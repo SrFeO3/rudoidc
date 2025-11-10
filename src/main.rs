@@ -561,7 +561,7 @@ async fn authorize_handler(
         None => return (StatusCode::BAD_REQUEST, "redirect_uri is required").into_response(),
     };
     if !client.allowed_redirect_uris.contains(redirect_uri) {
-        warn!("Invalid authorize request for client {}: redirect_uri {} not allowed", client_id, redirect_uri);
+        warn!("Invalid authorize request for client {}: redirect_uri {} not allowed, expected uri {:?}", client_id, redirect_uri, client.allowed_redirect_uris);
         return (StatusCode::BAD_REQUEST, "Invalid redirect_uri").into_response();
     }
 
