@@ -108,36 +108,29 @@
 //   - Usage: Used for PKCE verification by hashing the `code_verifier` with SHA-256.
 // `tracing`: A framework for instrumenting Rust programs to collect structured, event-based diagnostic information.
 //   - Usage: Logging application events with different levels (info, warn, error) for monitoring and debugging.
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use axum::{
-    Router,
+    body::Body,
     extract::{Form, State},
-    http::{self, HeaderMap, Method, Request, StatusCode, header},
+    extract::Query,
+    http::{self, header, HeaderMap, Method, Request, StatusCode},
     middleware::{self, Next},
-    response::{Html, Response, IntoResponse, Redirect},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
-    body::Body, Json, extract::Query,
+    Json, Router,
 };
-
-use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
-use chrono::{DateTime, Utc};
-
-use rand::rngs::OsRng;
-use rsa::{RsaPrivateKey};
-use rsa::traits::PublicKeyParts;
-use rsa::pkcs8::EncodePrivateKey;
-use rand::{distributions::{Alphanumeric, DistString}};
-use serde_json;
-
-use sha2::{Digest, Sha256};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use tracing::{info, warn, error};
+use chrono::{DateTime, Utc};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use rand::{rngs::OsRng, Rng};
+use rsa::{pkcs8::EncodePrivateKey, traits::PublicKeyParts, RsaPrivateKey};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use url::Url;
 
 // serverConfig holds common configuration values for the entire server.
 #[derive(Clone, Debug)]
@@ -625,7 +618,7 @@ async fn login_post_handler(
     );
 
     // Generate authorization code and store it with its info
-    let code = Alphanumeric.sample_string(&mut rand::thread_rng(), 32);
+    let code: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect();
     let code_info = AuthCodeInfo {
         username: username.clone(),
         client_id: client_id.clone(),
@@ -642,7 +635,7 @@ async fn login_post_handler(
     }
 
     // Build the redirect URL
-    let mut redirect_url = url::Url::parse(&redirect_uri).expect("Failed to parse redirect_uri");
+    let mut redirect_url = Url::parse(&redirect_uri).expect("Failed to parse redirect_uri");
     redirect_url.query_pairs_mut()
         .append_pair("code", &code)
         .append_pair("state", &params.get("state").cloned().unwrap_or_default());
@@ -842,7 +835,7 @@ async fn api_token_handler(
     });
 
     if grant_type == Some("authorization_code") && scope.contains("offline_access") {
-        let new_refresh_token = Alphanumeric.sample_string(&mut rand::thread_rng(), 64);
+        let new_refresh_token: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(64).map(char::from).collect();
         let token_info = RefreshTokenInfo {
             username: username.to_string(),
             client_id: client_id_for_token.to_string(),
