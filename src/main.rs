@@ -277,7 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 allowed_redirect_uris: HashSet::from([
                     "https://bff.wgd.example.com:8000/".to_string(),
                     "https://www.wgd.example.com:8000/".to_string(),
-                    "http://localhost:8080/".to_string(),
+                    "http://localhost:8080/shop/".to_string(),
                 ]),
                 default_scope: "openid".to_string(), // other example = "openid profile email"
                 audience: "fruit-shop".to_string(),
