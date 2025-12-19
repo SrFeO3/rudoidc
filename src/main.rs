@@ -241,7 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // server static config
     let server_config = Arc::new(ServerConfig {
-        issuer: "https://auth.wgd.example.com:8000".to_string(),
+        issuer: "https://auth.sr.example.com:8000".to_string(),
         listen_address: "0.0.0.0:8082".to_string(),
     });
 
@@ -275,8 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "fruit-shop",
             Client {
                 allowed_redirect_uris: HashSet::from([
-                    "https://bff.wgd.example.com:8000/".to_string(),
-                    "https://www.wgd.example.com:8000/".to_string(),
+                    "https://www.sr.example.com:8000/shop/".to_string(),
                     "http://localhost:8080/shop/".to_string(),
                 ]),
                 default_scope: "openid".to_string(), // other example = "openid profile email"
