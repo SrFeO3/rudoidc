@@ -244,19 +244,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // test user
     let users: HashMap<&str, User> = HashMap::from([
         (
-            "user",
+            "suzuki",
             User {
                 password: "password".to_string(),
-                family_name: "Sato".to_string(),
+                family_name: "Suzuki".to_string(),
                 given_name: "Taro".to_string(),
                 preferred_username: "taro.sato".to_string(),
             },
         ),
         (
-            "user2",
+            "tanaka",
             User {
                 password: "password2".to_string(),
-                family_name: "Yamada".to_string(),
+                family_name: "Tanaka".to_string(),
                 given_name: "Hanako".to_string(),
                 preferred_username: "hana.yamada".to_string(),
             },
@@ -967,7 +967,7 @@ fn render_login_page(query: &str, error: Option<&str>) -> String {
 <body>
     <form method="post" action="/login?{}">
         <h2>Login</h2>
-        <div><label for="username">Username:</label><input type="text" id="username" name="username" value="user" required></div>
+        <div><label for="username">Username:</label><input type="text" id="username" name="username" value="suzuki" required></div>
         <div><label for="password">Password:</label><input type="password" id="password" name="password" value="password" required></div>
         <button type="submit">Log In</button>
         {}
