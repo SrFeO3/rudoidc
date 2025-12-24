@@ -184,6 +184,9 @@ struct Client {
     // to align with common OIDC terminology, although its role is to handle missing parameters.
     default_scope: String,
     audience: String,
+    access_token_lifetime_seconds: i64,
+    refresh_token_lifetime_seconds: i64,
+    id_token_lifetime_seconds: i64,
 }
 
 // AuthCodeInfo holds information related to an authorization code.
@@ -273,6 +276,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ]),
                 default_scope: "openid".to_string(), // other example = "openid profile email"
                 audience: "fruit-shop".to_string(),
+                access_token_lifetime_seconds: 10,
+                refresh_token_lifetime_seconds: 30 * 24 * 60 * 60,
+                id_token_lifetime_seconds: 3600,
             },
         ),
         (
@@ -283,6 +289,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ),
                 default_scope: "openid".to_string(),
                 audience: "another-api".to_string(),
+                access_token_lifetime_seconds: 10,
+                refresh_token_lifetime_seconds: 30 * 24 * 60 * 60,
+                id_token_lifetime_seconds: 3600,
             },
         ),
     ]);
@@ -836,12 +845,17 @@ async fn api_token_handler(
 
     if grant_type == Some("authorization_code") && scope.contains("offline_access") {
         let new_refresh_token: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(64).map(char::from).collect();
+        let client = app_state.clients.get(client_id_for_token.as_str()).expect("Client must exist");
+
         let token_info = RefreshTokenInfo {
             username: username.to_string(),
             client_id: client_id_for_token.to_string(),
             scope: scope.to_string(),
-            expires_at: now + chrono::Duration::days(30),
+            expires_at: now + chrono::Duration::seconds(client.refresh_token_lifetime_seconds),
         };
+
+        info!(?token_info, "Issued Refresh Token");
+
         {
             let mut refresh_tokens = app_state.refresh_tokens.lock().unwrap();
             refresh_tokens.insert(new_refresh_token.clone(), token_info);
@@ -855,13 +869,16 @@ async fn api_token_handler(
 }
 
 fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: DateTime<Utc>, app_state: &AppState) -> Result<String, jsonwebtoken::errors::Error> {
+    let client = app_state.clients.get(client_id).expect("Client must exist");
+    let iat = now.timestamp();
+
     // Start with base claims required by OIDC.
     let mut claims = serde_json::json!({
         "iss": &app_state.server_config.issuer,
         "sub": username,
         "aud": client_id,
-        "exp": (now + chrono::Duration::hours(1)).timestamp(),
-        "iat": now.timestamp(),
+        "exp": iat + client.id_token_lifetime_seconds,
+        "iat": iat,
         // As a default, set name to the username. This will be overridden if profile scope is present.
         "name": username,
     });
@@ -878,6 +895,8 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
         }
     }
 
+    info!(?claims, "Issued ID Token");
+
     let mut header = Header::new(jsonwebtoken::Algorithm::RS256);
     header.kid = Some(app_state.signing_key_id.to_string());
     let pem = app_state.private_key.to_pkcs8_pem(Default::default())
@@ -888,7 +907,7 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
 }
 
 fn create_signed_access_token(username: &str, audience: &str, scope: &str, client_id: &str, now: DateTime<Utc>, app_state: &AppState) -> Result<String, jsonwebtoken::errors::Error> {
-    #[derive(Serialize)]
+    #[derive(Serialize, Debug)]
     struct Claims<'a> {
         iss: &'a str,
         sub: &'a str,
@@ -899,15 +918,20 @@ fn create_signed_access_token(username: &str, audience: &str, scope: &str, clien
         scp: Vec<&'a str>,
     }
 
+    let client = app_state.clients.get(client_id).expect("Client must exist");
+    let iat = now.timestamp();
+
     let claims = Claims {
         iss: &app_state.server_config.issuer,
         sub: username,
         aud: audience,
-        exp: (now + chrono::Duration::seconds(10)).timestamp(),
-        iat: now.timestamp(),
+        exp: iat + client.access_token_lifetime_seconds,
+        iat,
         cid: client_id,
         scp: scope.split(' ').collect(),
     };
+
+    info!(?claims, "Issued Access Token");
 
     let mut header = Header::new(jsonwebtoken::Algorithm::RS256);
     header.kid = Some(app_state.signing_key_id.to_string());
