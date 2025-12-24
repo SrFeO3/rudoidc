@@ -808,10 +808,11 @@ async fn api_token_handler(
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
             }
         };
+        let client = app_state.clients.get(client_id_for_token.as_str()).expect("Client must exist");
         let response = serde_json::json!({
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": 3600,
+            "expires_in": client.access_token_lifetime_seconds,
             "scope": scope,
         });
         return (StatusCode::OK, Json(response)).into_response();
@@ -836,16 +837,16 @@ async fn api_token_handler(
         }
     };
 
+    let client = app_state.clients.get(client_id_for_token.as_str()).expect("Client must exist");
     let mut response_body = serde_json::json!({
         "access_token": access_token,
         "id_token": id_token,
         "token_type": "Bearer",
-        "expires_in": 3600,
+        "expires_in": client.access_token_lifetime_seconds,
     });
 
     if grant_type == Some("authorization_code") && scope.contains("offline_access") {
         let new_refresh_token: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(64).map(char::from).collect();
-        let client = app_state.clients.get(client_id_for_token.as_str()).expect("Client must exist");
 
         let token_info = RefreshTokenInfo {
             username: username.to_string(),
