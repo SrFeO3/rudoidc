@@ -2,7 +2,7 @@
 
 This project is a simplified, demonstration-purpose OpenID Connect (OIDC) provider written in Rust. It implements two primary OAuth 2.0 grant types, making it suitable for learning and testing OIDC flows.
 
-1.  **Authorization Code Grant with PKCE**: For interactive user authentication in web applications (SPAs).
+1.  **Authorization Code Grant**: For interactive user authentication in web applications (SPAs, BFFs).
 2.  **Client Credentials Grant**: For non-interactive, machine-to-machine (M2M) communication.
 
 ## Getting Started
@@ -28,15 +28,13 @@ By default, the server will start on `0.0.0.0:8082`.
 
 ### Configuration
 
-For this demonstration, all configuration is hardcoded in `/src/main.rs`:
+The server configuration is loaded from a YAML file. By default, it looks for `conf/config.yaml`. You can specify a custom path using the `CONFIG_FILE` environment variable.
 
--   **Issuer URL**: `https://auth.sr.example.com:8000`
--   **Listen Address**: `0.0.0.0:8082`
--   **Test Users**: A `HashMap` of users and passwords.
--   **Test Clients**: A `HashMap` of clients, their redirect URIs, and audiences.
--   **Client Credentials**: A `HashMap` of credentials for the M2M flow.
-
-You can modify these directly in the source code to fit your testing needs.
+The configuration file defines:
+-   **Server Settings**: Issuer URL, listen address, and clock skew leeway.
+-   **Users**: Test users with passwords and profile data.
+-   **Clients**: OAuth clients (SPA, BFF) with their settings (redirect URIs, secrets, etc.).
+-   **Basic Auth Credentials**: Credentials for M2M flow.
 
 ## API Endpoints
 
@@ -65,3 +63,4 @@ This is a minimal implementation for demonstration and educational purposes. It 
 -   **State Management**: This server uses in-memory, `Mutex`-protected `HashMap`s for storing authorization codes and refresh tokens. This data is volatile and will be lost on restart. A persistent database is required for a production environment.
 -   **HTTPS**: This demo runs on HTTP for simplicity. A production OIDC provider **MUST** use HTTPS for all communication to protect credentials.
 -   **State Parameter**: The server correctly handles the `state` parameter to mitigate CSRF attacks, but it is the client's responsibility to generate and validate it.
+-   **Scope Validation**: The server validates that requested scopes are within the supported list (`openid`, `profile`, `offline_access`) and that `openid` is present.

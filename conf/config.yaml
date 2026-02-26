@@ -1,0 +1,50 @@
+server:
+  issuer: "https://auth.sr.example.com:8000"
+  listen_address: "0.0.0.0:8082"
+  leeway_seconds: 5
+
+users:
+  suzuki:
+    password: "password"
+    family_name: "Suzuki"
+    given_name: "Taro"
+    preferred_username: "taro.sato"
+  tanaka:
+    password: "password2"
+    family_name: "Tanaka"
+    given_name: "Hanako"
+    preferred_username: "hana.yamada"
+
+clients:
+  fruit-shop:
+    client_type: Confidential
+    allowed_redirect_uris:
+      - "https://www.sr.example.com:8000/shop/"
+      - "http://localhost:8080/shop/"
+    default_scope: "openid"
+    audience: "fruit-shop"
+    access_token_lifetime_seconds: 10
+    refresh_token_lifetime_seconds: 2592000
+    id_token_lifetime_seconds: 3600
+    client_secret: "fruit-shop-secret"
+  another-app:
+    client_type: Public
+    allowed_redirect_uris:
+      - "http://sample.another.example.com:9090/callback"
+    default_scope: "openid"
+    audience: "another-api"
+    access_token_lifetime_seconds: 10
+    refresh_token_lifetime_seconds: 2592000
+    id_token_lifetime_seconds: 3600
+    client_secret: null
+
+basic_auth_credentials:
+  service-account-1:
+    password: "secret-for-sa1"
+    client_id: "fruit-shop"
+  batch-job-runner:
+    password: "secret-for-batch"
+    client_id: "fruit-shop"
+  another-app-service:
+    password: "secret-for-another"
+    client_id: "another-app"

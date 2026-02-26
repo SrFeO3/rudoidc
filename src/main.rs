@@ -1,10 +1,19 @@
 //! A simplified OIDC (OpenID Connect) provider written in Rust.
 //!
-//! This server is designed for demonstration purposes and implements two primary OAuth 2.0 grant types:
-//! 1. **Authorization Code Grant with PKCE**: For interactive user authentication in Single Page
-//!    Applications (SPAs). This is the standard, secure flow for web apps.
-//! 2. **Client Credentials Grant**: For non-interactive, machine-to-machine (M2M) communication.
-//!    This allows backend services to authenticate themselves and obtain access tokens.
+//! This server is designed for demonstration purposes and supports three primary client types:
+//! 1. **Pure SPA (Public Client)**
+//!    - Flow: Authorization Code Flow with PKCE
+//!    - Client Secret: None
+//!    - Nonce: Required
+//! 2. **BFF (Confidential Client)**
+//!    - Flow: Authorization Code Flow
+//!    - Client Secret: Required
+//!    - Nonce: Required
+//!    - PKCE: Optional (used for defense-in-depth)
+//! 3. **M2M (Machine-to-Machine)**
+//!    - Grant: Client Credentials Grant
+//!    - Client Secret: Required
+//!    - Nonce: Not required
 //!
 //! Key Functionalities:
 //! - User login via a simple HTML form.
@@ -17,11 +26,15 @@
 //!
 //! OIDC Implementation Details:
 //! This server implements a specific subset of the OIDC standard tailored for this demo.
-//! - Flow: Authorization Code Flow with PKCE. This is the recommended secure flow for SPAs.
-//! - Client Type: Public Client. The server assumes the client is a public client (like a browser-based app) and does not require a client secret for the token exchange.
-//! - Security (PKCE): PKCE (Proof Key for Code Exchange) is implemented to mitigate authorization code interception attacks.
+//! - **Flows**: Authorization Code Flow (with PKCE) and Client Credentials Grant.
+//! - **Client Types**: Supports both Public Clients (SPAs) and Confidential Clients (BFFs, Backend Services).
+//! - **Security**:
+//!   - PKCE: Enforced for Public Clients, optional for Confidential Clients.
+//!   - Client Secret: Verified for Confidential Clients.
+//!   - Nonce: Supported for OIDC flows.
+//!   - **Scope Validation**: The server validates that requested scopes (`openid`, `profile`, `offline_access`) are from a known list. The `openid` scope is mandatory.
 //! - Token Format: ID Tokens and Access Tokens are issued as JWTs (JSON Web Tokens).
-//! - Signing Algorithm: All JWTs are signed using the RS256 (RSA Signature with SHA-256) algorithm.
+//! - Signing Algorithm: All JWTs are signed using the EdDSA (Edwards-curve Digital Signature Algorithm) with Ed25519.
 //! - Standard & Version: This implementation is based on the core features of OpenID Connect 1.0, the foundational set of specifications finalized in 2014. The official specifications can be found at the OpenID Foundation: https://openid.net/connect/
 //! - Constituent Specifications: OIDC 1.0 is a "specification family" built upon several standards:
 //!   - **OAuth 2.0 (RFC 6749)**: The core authorization framework.
@@ -89,25 +102,7 @@
 //!
 //! Note: This is a minimal implementation for a demo. For production use,
 //! consider using a certified OIDC provider and a more robust session/token storage mechanism.
-//!
 
-// --- Crate (Library) Usage ---
-// `tokio`: An asynchronous runtime for Rust.
-//   - Usage: Powers the entire application, enabling non-blocking I/O for the web server (`#[tokio::main]`).
-// `axum`: A web application framework built on top of `tokio`.
-//   - Usage: Building the web server, defining routes (`Router`), handling HTTP requests/responses, and extracting data (`State`, `Form`, `HeaderMap`).
-// `serde` & `serde_json`: A framework for serializing and deserializing Rust data structures.
-//   - Usage: Converting between Rust structs and JSON for API responses (`Json(...)`) and JWT claims.
-// `chrono`: A date and time library for Rust.
-//   - Usage: Handling timestamps for token expiration (`exp`) and issuance (`iat`).
-// `rsa`: Implements the RSA algorithm for public-key cryptography.
-//   - Usage: Generating the public/private key pair for signing JWTs (`RsaPrivateKey::new`).
-// `jsonwebtoken`: A library for creating and validating JSON Web Tokens (JWTs).
-//   - Usage: Creating and signing ID/access tokens (`encode`) and validating them (`decode`).
-// `sha2`: Provides SHA-2 hashing functions.
-//   - Usage: Used for PKCE verification by hashing the `code_verifier` with SHA-256.
-// `tracing`: A framework for instrumenting Rust programs to collect structured, event-based diagnostic information.
-//   - Usage: Logging application events with different levels (info, warn, error) for monitoring and debugging.
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -123,22 +118,35 @@ use axum::{
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Utc};
+use ed25519_dalek::SigningKey;
+use ed25519_dalek::pkcs8::EncodePrivateKey;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use rand::{rngs::OsRng, Rng};
-use rsa::{pkcs8::EncodePrivateKey, traits::PublicKeyParts, RsaPrivateKey};
-use serde::{Deserialize, Serialize};
+use rand::rngs::OsRng;
+use rand::Rng;
+use serde::{Deserialize, Serialize}; // Ensure serde_yaml is added to Cargo.toml
 use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
 
 // serverConfig holds common configuration values for the entire server.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 struct ServerConfig {
     /// The public-facing issuer URL for OIDC discovery and JWT 'iss' claims. (Application-level)
     issuer: String,
     /// The internal network address (IP:PORT) the server process binds to. (Infrastructure-level)
     listen_address: String,
+    /// The leeway in seconds for JWT expiration validation to account for clock skew.
+    #[serde(default)]
+    leeway_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AppConfig {
+    server: ServerConfig,
+    users: HashMap<String, User>,
+    clients: HashMap<String, Client>,
+    basic_auth_credentials: HashMap<String, BasicAuthCredential>,
 }
 
 // User represents a user in the system with their profile information.
@@ -147,7 +155,7 @@ struct ServerConfig {
 // https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims
 // This struct is for human users who authenticate via the Authorization Code Flow.
 // For machine-to-machine authentication, see BasicAuthCredential.
-#[derive(Clone)]
+#[derive(Clone, Deserialize)]
 struct User {
     password: String,
     family_name: String,
@@ -157,7 +165,7 @@ struct User {
 
 // BasicAuthCredential defines a username and password pair for Client Credentials Grant.
 // This allows a single client application to have multiple, distinct credentials (e.g., for different services or jobs).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 struct BasicAuthCredential {
     password: String,
     client_id: String, // The client application this credential belongs to.
@@ -176,8 +184,15 @@ impl std::fmt::Debug for User {
 }
 
 /// OAuth OIDC client
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+enum ClientType {
+    Public,       // For SPAs, cannot keep a secret.
+    Confidential, // For BFFs or traditional web apps, can keep a secret.
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct Client {
+    client_type: ClientType,
     allowed_redirect_uris: HashSet<String>,
     // DefaultScope specifies the scope to be used when a client omits the 'scope' parameter.
     // It essentially acts as a "fallback scope". The term "Default Scope" is used here
@@ -187,6 +202,7 @@ struct Client {
     access_token_lifetime_seconds: i64,
     refresh_token_lifetime_seconds: i64,
     id_token_lifetime_seconds: i64,
+    client_secret: Option<String>,
 }
 
 // AuthCodeInfo holds information related to an authorization code.
@@ -197,6 +213,7 @@ struct AuthCodeInfo {
     scope: String, // The scope requested by the client.
     code_challenge: String, // The PKCE code challenge.
     code_challenge_method: String, // The PKCE code challenge method (e.g., "S256").
+    nonce: Option<String>,
     expires_at: DateTime<Utc>, // The expiration time of the code.
 }
 
@@ -213,10 +230,10 @@ struct RefreshTokenInfo {
 #[derive(Clone)]
 struct AppState {
     server_config: Arc<ServerConfig>,
-    users: Arc<HashMap<&'static str, User>>,
-    clients: Arc<HashMap<&'static str, Client>>,
-    basic_auth_credentials: Arc<HashMap<&'static str, BasicAuthCredential>>,
-    private_key: Arc<RsaPrivateKey>,
+    users: Arc<HashMap<String, User>>,
+    clients: Arc<HashMap<String, Client>>,
+    basic_auth_credentials: Arc<HashMap<String, BasicAuthCredential>>,
+    signing_key: Arc<SigningKey>,
     allowed_origins: Arc<HashSet<String>>,
     signing_key_id: Arc<String>,
     // In-memory store for authorization codes. Protected by a Mutex for concurrent access.
@@ -235,94 +252,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // server static config
-    let server_config = Arc::new(ServerConfig {
-        issuer: "https://auth.sr.example.com:8000".to_string(),
-        listen_address: "0.0.0.0:8082".to_string(),
-    });
+    // Load configuration from file specified by CONFIG_FILE env var, defaulting to conf/config.yaml
+    let config_path = std::env::var("CONFIG_FILE").unwrap_or_else(|_| "conf/config.yaml".to_string());
+    info!(config_path, "Loading configuration...");
+    let config_content = std::fs::read_to_string(&config_path)?;
+    let app_config: AppConfig = serde_yaml::from_str(&config_content)?;
 
-    // test user
-    let users: HashMap<&str, User> = HashMap::from([
-        (
-            "suzuki",
-            User {
-                password: "password".to_string(),
-                family_name: "Suzuki".to_string(),
-                given_name: "Taro".to_string(),
-                preferred_username: "taro.sato".to_string(),
-            },
-        ),
-        (
-            "tanaka",
-            User {
-                password: "password2".to_string(),
-                family_name: "Tanaka".to_string(),
-                given_name: "Hanako".to_string(),
-                preferred_username: "hana.yamada".to_string(),
-            },
-        ),
-    ]);
-    // NOTE: Logging user data, including passwords, is a security risk. This is for demonstration purposes only.
-    info!(user_count = users.len(), users = ?users, "User database initialized.");
+    let server_config = Arc::new(app_config.server);
+    let users = app_config.users;
+    let clients = app_config.clients;
+    let basic_auth_credentials = app_config.basic_auth_credentials;
 
-    // Test OAuth OIDC Client
-    let clients: HashMap<&str, Client> = HashMap::from([
-        (
-            "fruit-shop",
-            Client {
-                allowed_redirect_uris: HashSet::from([
-                    "https://www.sr.example.com:8000/shop/".to_string(),
-                    "http://localhost:8080/shop/".to_string(),
-                ]),
-                default_scope: "openid".to_string(), // other example = "openid profile email"
-                audience: "fruit-shop".to_string(),
-                access_token_lifetime_seconds: 10,
-                refresh_token_lifetime_seconds: 30 * 24 * 60 * 60,
-                id_token_lifetime_seconds: 3600,
-            },
-        ),
-        (
-            "another-app",
-            Client {
-                allowed_redirect_uris: HashSet::from(
-                    ["http://sample.another.example.com:9090/callback".to_string()],
-                ),
-                default_scope: "openid".to_string(),
-                audience: "another-api".to_string(),
-                access_token_lifetime_seconds: 10,
-                refresh_token_lifetime_seconds: 30 * 24 * 60 * 60,
-                id_token_lifetime_seconds: 3600,
-            },
-        ),
-    ]);
-    info!(client_count = clients.len(), clients = ?clients, "Client database initialized.");
+    info!(user_count = users.len(), client_count = clients.len(), "Configuration loaded.");
 
-    // basicAuthCredentials holds the credentials for the Client Credentials Grant.
-    // The key is the username used for HTTP Basic Authentication.
-    let basic_auth_credentials: HashMap<&'static str, BasicAuthCredential> = HashMap::from([
-        (
-            "service-account-1",
-            BasicAuthCredential {
-                password: "secret-for-sa1".to_string(),
-                client_id: "fruit-shop".to_string(),
-            },
-        ),
-        (
-            "batch-job-runner",
-            BasicAuthCredential {
-                password: "secret-for-batch".to_string(),
-                client_id: "fruit-shop".to_string(),
-            },
-        ),
-        (
-            "another-app-service",
-            BasicAuthCredential { password: "secret-for-another".to_string(), client_id: "another-app".to_string() }
-        )
-    ]);
-
-    info!("Generating 2048 bit RSA key pair...");
+    info!("Generating Ed25519 key pair...");
     let mut rng = OsRng;
-    let private_key = Arc::new(RsaPrivateKey::new(&mut rng, 2048)?);
+    let signing_key = Arc::new(SigningKey::generate(&mut rng));
     info!("Key pair generated successfully.");
 
     // Pre-calculate the set of allowed origins at server startup.
@@ -349,7 +294,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         users: Arc::new(users),
         clients: Arc::new(clients),
         basic_auth_credentials: Arc::new(basic_auth_credentials),
-        private_key,
+        signing_key,
         allowed_origins: Arc::new(allowed_origins),
         signing_key_id: Arc::new("SigningKeyID001".to_string()),
         auth_codes: auth_codes.clone(),
@@ -508,7 +453,7 @@ async fn discovery_handler(
         "jwks_uri": format!("{}/jwks.json", config.issuer),
         "response_types_supported": ["code"],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["RS256"],
+        "id_token_signing_alg_values_supported": ["EdDSA"],
     });
     info!("Served OIDC discovery configuration");
     (StatusCode::OK, Json(discovery_doc))
@@ -517,18 +462,17 @@ async fn discovery_handler(
 async fn jwks_handler(
     State(app_state): State<AppState>,
 ) -> impl IntoResponse {
-    let public_key = app_state.private_key.to_public_key();
-    let n = URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
-    let e = URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
+    let verifying_key = app_state.signing_key.verifying_key();
+    let x = URL_SAFE_NO_PAD.encode(verifying_key.as_bytes());
 
     let jwks = serde_json::json!({
         "keys": [{
-            "kty": "RSA",
+            "kty": "OKP",
+            "crv": "Ed25519",
             "kid": &*app_state.signing_key_id,
             "use": "sig",
-            "alg": "RS256",
-            "n": n,
-            "e": e,
+            "alg": "EdDSA",
+            "x": x,
         }]
     });
 
@@ -564,6 +508,12 @@ async fn authorize_handler(
     if !client.allowed_redirect_uris.contains(redirect_uri) {
         warn!("Invalid authorize request for client {}: redirect_uri {} not allowed, expected uri {:?}", client_id, redirect_uri, client.allowed_redirect_uris);
         return (StatusCode::BAD_REQUEST, "Invalid redirect_uri").into_response();
+    }
+
+    // Validate nonce (Required per specification for SPA and BFF)
+    if params.get("nonce").is_none() {
+        warn!("Invalid authorize request: nonce is required");
+        return (StatusCode::BAD_REQUEST, "nonce is required").into_response();
     }
 
     // Pass the original query string to the login form's action.
@@ -617,6 +567,12 @@ async fn login_post_handler(
         return (StatusCode::BAD_REQUEST, "Invalid redirect_uri").into_response();
     }
 
+    // Validate nonce (Required per specification)
+    if params.get("nonce").is_none() {
+        warn!("Invalid login request: nonce is required");
+        return (StatusCode::BAD_REQUEST, "nonce is required").into_response();
+    }
+
     // Determine scope
     let scope = params.get("scope").map_or_else(
         || {
@@ -626,6 +582,21 @@ async fn login_post_handler(
         |s| s.clone(),
     );
 
+    let requested_scopes: HashSet<&str> = scope.split_whitespace().collect();
+    const SUPPORTED_SCOPES: &[&str] = &["openid", "profile", "offline_access"];
+
+    if !requested_scopes.contains("openid") {
+        warn!("Invalid login request: 'openid' scope is required");
+        return (StatusCode::BAD_REQUEST, "invalid_scope: 'openid' scope is required").into_response();
+    }
+
+    for s in &requested_scopes {
+        if !SUPPORTED_SCOPES.contains(s) {
+            warn!(client_id, scope = s, "Invalid login request: unsupported scope requested");
+            return (StatusCode::BAD_REQUEST, "invalid_scope: one or more scopes are not supported").into_response();
+        }
+    }
+
     // Generate authorization code and store it with its info
     let code: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect();
     let code_info = AuthCodeInfo {
@@ -634,6 +605,7 @@ async fn login_post_handler(
         scope,
         code_challenge: params.get("code_challenge").cloned().unwrap_or_default(),
         code_challenge_method: params.get("code_challenge_method").cloned().unwrap_or_default(),
+        nonce: params.get("nonce").cloned(),
         expires_at: Utc::now() + chrono::Duration::minutes(1),
     };
 
@@ -659,19 +631,28 @@ async fn api_token_handler(
     Form(payload): Form<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let grant_type = payload.get("grant_type").map(|s| s.as_str());
-    let client_id = payload.get("client_id").cloned().unwrap_or_default();
+    let mut client_id = payload.get("client_id").cloned().unwrap_or_default();
+
+    // If client_id is not provided in the form body, try to extract it from the Basic Auth header.
+    // This is common for Confidential Clients (BFFs) using Basic Auth for authentication.
+    if client_id.is_empty() {
+        if let Some(auth_header) = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+            if let Some(encoded) = auth_header.strip_prefix("Basic ") {
+                if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+                    let creds = String::from_utf8(decoded).unwrap_or_default();
+                    if let Some((id, _)) = creds.split_once(':') {
+                        client_id = id.to_string();
+                    }
+                }
+            }
+        }
+    }
 
     info!(grant_type, client_id, "Token endpoint called");
 
-    let (username, scope, audience, client_id_for_token) = match grant_type {
+    let (username, scope, audience, client_id_for_token, nonce) = match grant_type {
         Some("authorization_code") => {
             let code = payload.get("code").cloned().unwrap_or_default();
-            let code_verifier = payload.get("code_verifier").cloned().unwrap_or_default();
-
-            if code_verifier.is_empty() {
-                warn!("PKCE error: code_verifier is missing");
-                return (StatusCode::BAD_REQUEST, "code_verifier is required").into_response();
-            }
 
             let code_info = {
                 let mut auth_codes = app_state.auth_codes.lock().unwrap();
@@ -696,21 +677,77 @@ async fn api_token_handler(
                 return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
             }
 
-            if !verify_pkce(&code_info.code_challenge, &code_info.code_challenge_method, &code_verifier) {
-                warn!(user = %code_info.username, "PKCE verification failed");
-                return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
-            }
-            info!(user = %code_info.username, "PKCE verification successful");
-
-            let audience = match app_state.clients.get(client_id.as_str()) {
-                Some(client) => client.audience.clone(),
+            // Get client configuration to determine validation rules
+            let client = match app_state.clients.get(client_id.as_str()) {
+                Some(c) => c,
                 None => {
                     // This case should ideally not be reached due to prior checks, but as a safeguard:
                     warn!(client_id, "Client not found during audience lookup in token handler");
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Client configuration error").into_response();
                 }
             };
-            (code_info.username, code_info.scope, audience, client_id)
+            
+            // --- Client Type Specific Validations ---
+            match client.client_type {
+                ClientType::Public => {
+                    // Public clients (SPAs) MUST use PKCE and MUST NOT use a client secret.
+                    let code_verifier = payload.get("code_verifier").cloned().unwrap_or_default();
+                    if code_verifier.is_empty() {
+                        warn!(client_id, "PKCE error: code_verifier is missing for public client");
+                        return (StatusCode::BAD_REQUEST, "code_verifier is required for public clients").into_response();
+                    }
+                    if !verify_pkce(&code_info.code_challenge, &code_info.code_challenge_method, &code_verifier) {
+                        warn!(user = %code_info.username, "PKCE verification failed for public client");
+                        return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                    }
+                    info!(user = %code_info.username, "PKCE verification successful for public client");
+                }
+                ClientType::Confidential => {
+                    // Confidential clients (BFFs) MUST authenticate with a client_secret.
+                    let expected_secret = match &client.client_secret {
+                        Some(s) => s,
+                        None => {
+                            error!(client_id, "Server configuration error: Confidential client has no secret configured.");
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Server configuration error").into_response();
+                        }
+                    };
+
+                    // Try to get secret from Basic Auth header first, then from the POST body.
+                    let provided_secret = if let Some(auth_header) = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+                        if let Some(encoded) = auth_header.strip_prefix("Basic ") {
+                            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+                                let creds = String::from_utf8(decoded).unwrap_or_default();
+                                // We only care about the password part for client_secret validation here.
+                                creds.split_once(':').map(|(_, p)| p.to_string())
+                            } else { None }
+                        } else { None }
+                    } else {
+                        payload.get("client_secret").cloned()
+                    };
+
+                    if provided_secret.as_deref() != Some(expected_secret.as_str()) {
+                        warn!(client_id, "Invalid client_secret provided for confidential client");
+                        return (StatusCode::UNAUTHORIZED, "Invalid client authentication").into_response();
+                    }
+                    info!(client_id, "Client secret verified successfully for confidential client");
+
+                    // PKCE is optional (defense-in-depth). If a challenge was sent, the verifier must be present and valid.
+                    if !code_info.code_challenge.is_empty() {
+                        let code_verifier = payload.get("code_verifier").cloned().unwrap_or_default();
+                        if code_verifier.is_empty() {
+                            warn!(client_id, "PKCE error: code_verifier is missing for a request that used a code_challenge");
+                            return (StatusCode::BAD_REQUEST, "code_verifier is required when code_challenge is used").into_response();
+                        }
+                        if !verify_pkce(&code_info.code_challenge, &code_info.code_challenge_method, &code_verifier) {
+                            warn!(user = %code_info.username, "PKCE verification failed for confidential client");
+                            return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                        }
+                        info!(user = %code_info.username, "PKCE verification successful for confidential client (defense-in-depth)");
+                    }
+                }
+            }
+
+            (code_info.username, code_info.scope, client.audience.clone(), client_id, code_info.nonce)
         }
         Some("refresh_token") => {
             let refresh_token = payload.get("refresh_token").cloned().unwrap_or_default();
@@ -747,7 +784,7 @@ async fn api_token_handler(
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Client configuration error").into_response();
                 }
             };
-            (token_info.username, token_info.scope, audience, client_id)
+            (token_info.username, token_info.scope, audience, client_id, None)
         }
         Some("client_credentials") => {
             // For Client Credentials, authentication is performed via HTTP Basic Auth.
@@ -789,7 +826,24 @@ async fn api_token_handler(
             };
 
             let scope = payload.get("scope").map_or_else(|| client.default_scope.clone(), |s| s.clone());
-            (auth_username, scope, client.audience.clone(), cred.client_id.clone())
+
+            // Validate scopes for M2M grant, similar to authorization code flow.
+            const SUPPORTED_SCOPES: &[&str] = &["openid", "profile", "offline_access"];
+            let requested_scopes: HashSet<&str> = scope.split_whitespace().collect();
+
+            // Require 'openid' scope for consistency, even for M2M.
+            if !requested_scopes.contains("openid") {
+                warn!(client_id = %cred.client_id, "M2M grant: 'openid' scope is required");
+                return (StatusCode::BAD_REQUEST, "invalid_scope: 'openid' scope is required").into_response();
+            }
+
+            for s in &requested_scopes {
+                if !SUPPORTED_SCOPES.contains(s) {
+                    warn!(client_id = %cred.client_id, scope = s, "M2M grant: unsupported scope requested");
+                    return (StatusCode::BAD_REQUEST, "invalid_scope: one or more scopes are not supported").into_response();
+                }
+            }
+            (auth_username, scope, client.audience.clone(), cred.client_id.clone(), None)
         }
         _ => {
             warn!(?grant_type, "Unsupported grant_type");
@@ -821,7 +875,7 @@ async fn api_token_handler(
     info!(user = %username, "Successfully validated grant. Generating tokens...");
 
     let now = Utc::now();
-    let id_token = match create_signed_id_token(&username, &client_id_for_token, &scope, now, &app_state) {
+    let id_token = match create_signed_id_token(&username, &client_id_for_token, &scope, now, &app_state, nonce) {
         Ok(token) => token,
         Err(e) => {
             tracing::error!(user = %username, error = ?e, "Failed to sign id token");
@@ -869,7 +923,7 @@ async fn api_token_handler(
     (StatusCode::OK, Json(response_body)).into_response()
 }
 
-fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: DateTime<Utc>, app_state: &AppState) -> Result<String, jsonwebtoken::errors::Error> {
+fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: DateTime<Utc>, app_state: &AppState, nonce: Option<String>) -> Result<String, jsonwebtoken::errors::Error> {
     let client = app_state.clients.get(client_id).expect("Client must exist");
     let iat = now.timestamp();
 
@@ -883,6 +937,10 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
         // As a default, set name to the username. This will be overridden if profile scope is present.
         "name": username,
     });
+
+    if let Some(n) = nonce {
+        claims.as_object_mut().unwrap().insert("nonce".to_string(), serde_json::Value::String(n));
+    }
 
     // If the "profile" scope is requested, add more user profile claims.
     if scope.contains("profile") {
@@ -898,12 +956,11 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
 
     info!(?claims, "Issued ID Token");
 
-    let mut header = Header::new(jsonwebtoken::Algorithm::RS256);
+    let mut header = Header::new(jsonwebtoken::Algorithm::EdDSA);
     header.kid = Some(app_state.signing_key_id.to_string());
-    let pem = app_state.private_key.to_pkcs8_pem(Default::default())
+    let pem = app_state.signing_key.to_pkcs8_pem(Default::default())
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
-    let encoding_key = EncodingKey::from_rsa_pem(pem.as_bytes())
-        .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
+    let encoding_key = EncodingKey::from_ed_pem(pem.as_bytes())?;
     encode(&header, &claims, &encoding_key)
 }
 
@@ -934,12 +991,11 @@ fn create_signed_access_token(username: &str, audience: &str, scope: &str, clien
 
     info!(?claims, "Issued Access Token");
 
-    let mut header = Header::new(jsonwebtoken::Algorithm::RS256);
+    let mut header = Header::new(jsonwebtoken::Algorithm::EdDSA);
     header.kid = Some(app_state.signing_key_id.to_string());
-    let pem = app_state.private_key.to_pkcs8_pem(Default::default())
+    let pem = app_state.signing_key.to_pkcs8_pem(Default::default())
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
-    let encoding_key = EncodingKey::from_rsa_pem(pem.as_bytes())
-        .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
+    let encoding_key = EncodingKey::from_ed_pem(pem.as_bytes())?;
     encode(&header, &claims, &encoding_key)
 }
 
@@ -993,39 +1049,43 @@ async fn api_user_handler(
 
     // Define the claims we expect in the access token.
     #[derive(Deserialize)]
-    struct UserInfoClaims {
-        sub: String,
-        family_name: Option<String>,
-        given_name: Option<String>,
-        preferred_username: Option<String>,
-    }
+    struct AccessTokenClaims { sub: String }
 
-    let public_key = app_state.private_key.to_public_key();
-    let decoding_key = DecodingKey::from_rsa_components(
-        &URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be()),
-        &URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be()),
-    )
-    .expect("Failed to create decoding key from RSA components");
-    let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
+    let x = URL_SAFE_NO_PAD.encode(app_state.signing_key.verifying_key().as_bytes());
+    let decoding_key = match DecodingKey::from_ed_components(&x) {
+        Ok(key) => key,
+        Err(e) => {
+            error!(error = ?e, "Failed to create EdDSA decoding key");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+        }
+    };
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::EdDSA);
     // For userinfo, we don't strictly need to validate the audience, as long as the token is valid.
     validation.validate_aud = false;
+    validation.leeway = app_state.server_config.leeway_seconds;
 
-    let claims = match decode::<UserInfoClaims>(token_string, &decoding_key, &validation) {
+    let claims = match decode::<AccessTokenClaims>(token_string, &decoding_key, &validation) {
         Ok(token_data) => token_data.claims,
         Err(e) => {
             warn!(error = ?e, "Invalid token provided to userinfo endpoint");
             return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
         }
     };
+    
+    let user_info = match app_state.users.get(&claims.sub) {
+        Some(user) => serde_json::json!({
+            "sub": claims.sub,
+            "family_name": user.family_name,
+            "given_name": user.given_name,
+            "preferred_username": user.preferred_username,
+        }),
+        None => {
+            error!(user = %claims.sub, "User from valid token not found in state");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "User not found").into_response();
+        }
+    };
 
-    let user_info = serde_json::json!({
-        "sub": claims.sub,
-        "family_name": claims.family_name,
-        "given_name": claims.given_name,
-        "preferred_username": claims.preferred_username,
-    });
-
-    info!(user = %claims.sub, "Successfully served userinfo");
+    info!(user = %user_info["sub"], "Successfully served userinfo");
     (StatusCode::OK, Json(user_info)).into_response()
 }
 
@@ -1055,23 +1115,26 @@ async fn logout_handler(
         cid: String,
     }
 
-    let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::EdDSA);
     validation.validate_exp = false; // Don't validate expiration time
     validation.validate_aud = false; // Don't validate audience for logout
 
-    let public_key = app_state.private_key.to_public_key();
-    let decoding_key = DecodingKey::from_rsa_components(
-        &URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be()),
-        &URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be()),
-    )
-    .expect("Failed to create decoding key from RSA components");
+    let x = URL_SAFE_NO_PAD.encode(app_state.signing_key.verifying_key().as_bytes());
+    let decoding_key = match DecodingKey::from_ed_components(&x) {
+        Ok(key) => key,
+        Err(e) => {
+            error!(error = ?e, "Failed to create EdDSA decoding key for logout");
+            // Even on failure, don't block client-side logout.
+            return StatusCode::NO_CONTENT;
+        }
+    };
     let claims = match decode::<LogoutClaims>(token_string, &decoding_key, &validation) {
         Ok(token_data) => token_data.claims,
         Err(e) => {
             warn!(
                 error = ?e,
                 token = %token_string,
-                "Logout attempt with invalid token ... 2"
+                "Logout attempt with invalid token"
             );
             // Don't block the client-side process even if the token is invalid.
             return StatusCode::NO_CONTENT;

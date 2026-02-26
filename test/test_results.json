@@ -1,0 +1,312 @@
+[
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[discovery_endpoint]",
+    "outcome": "passed",
+    "duration": 0.0024121829992509447
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[jwks_endpoint]",
+    "outcome": "passed",
+    "duration": 0.0011375439971743617
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[token_alg_eddsa]",
+    "outcome": "passed",
+    "duration": 0.001479896000091685
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_01_basic]",
+    "outcome": "passed",
+    "duration": 0.004043412001919933
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_02_scope_openid]",
+    "outcome": "passed",
+    "duration": 0.002929668000433594
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_03_scope_profile]",
+    "outcome": "passed",
+    "duration": 0.002865302001737291
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_04_user_tanaka]",
+    "outcome": "passed",
+    "duration": 0.002785685999697307
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_05_pkce_s256]",
+    "outcome": "passed",
+    "duration": 0.002867176001018379
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_06_pkce_plain]",
+    "outcome": "passed",
+    "duration": 0.0019212610022805165
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_07_login_no_nonce]",
+    "outcome": "passed",
+    "duration": 0.0011193719983566552
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_08_login_no_redirect]",
+    "outcome": "passed",
+    "duration": 0.0009133889980148524
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_09_login_bad_redirect]",
+    "outcome": "passed",
+    "duration": 0.0009573900024406612
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_10_login_no_client_id]",
+    "outcome": "passed",
+    "duration": 0.0031612530001439154
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_11_login_bad_client_id]",
+    "outcome": "passed",
+    "duration": 0.0009881799996946938
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_12_token_no_verifier]",
+    "outcome": "passed",
+    "duration": 0.0018297520000487566
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_13_token_bad_verifier]",
+    "outcome": "passed",
+    "duration": 0.0017957010022655595
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_14_token_bad_code]",
+    "outcome": "passed",
+    "duration": 0.0016826569990371354
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_15_token_wrong_client]",
+    "outcome": "passed",
+    "duration": 0.001817344000301091
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_16_refresh_success]",
+    "outcome": "passed",
+    "duration": 0.004458412000531098
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_17_refresh_invalid]",
+    "outcome": "passed",
+    "duration": 0.0035627230026875623
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_18_refresh_wrong_client]",
+    "outcome": "passed",
+    "duration": 0.0036860719992546365
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_19_state_check]",
+    "outcome": "passed",
+    "duration": 0.0028352090012049302
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_20_replay_attack]",
+    "outcome": "passed",
+    "duration": 0.0036067699984414503
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_21_refresh_no_client_id]",
+    "outcome": "passed",
+    "duration": 0.0035531180001271423
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_22_userinfo_access]",
+    "outcome": "passed",
+    "duration": 0.009465200000704499
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_23_userinfo_expired_token]",
+    "outcome": "passed",
+    "duration": 16.01573149199976
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_24_login_fail_password]",
+    "outcome": "passed",
+    "duration": 0.001405353999871295
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_25_userinfo_tampered_token]",
+    "outcome": "passed",
+    "duration": 0.0045819280021532904
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_26_login_fail_no_openid_scope]",
+    "outcome": "passed",
+    "duration": 0.0010576210006547626
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[spa_27_login_fail_unsupported_scope]",
+    "outcome": "passed",
+    "duration": 0.0012198590011394117
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_01_basic]",
+    "outcome": "passed",
+    "duration": 0.003631973002484301
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_02_scope_openid]",
+    "outcome": "passed",
+    "duration": 0.003089818001171807
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_03_scope_profile]",
+    "outcome": "passed",
+    "duration": 0.0028114109991292935
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_04_user_suzuki]",
+    "outcome": "passed",
+    "duration": 0.0026094829991052393
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_05_pkce_defense]",
+    "outcome": "passed",
+    "duration": 0.0027917300030821934
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_06_no_pkce]",
+    "outcome": "passed",
+    "duration": 0.002682436999748461
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_07_login_no_nonce]",
+    "outcome": "passed",
+    "duration": 0.0008445989988103975
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_08_login_no_redirect]",
+    "outcome": "passed",
+    "duration": 0.0008137559998431243
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_09_login_bad_redirect]",
+    "outcome": "passed",
+    "duration": 0.0007856779993744567
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_10_login_no_client_id]",
+    "outcome": "passed",
+    "duration": 0.0007829819987819064
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_11_login_bad_client_id]",
+    "outcome": "passed",
+    "duration": 0.0007947929989313707
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_12_token_no_secret]",
+    "outcome": "passed",
+    "duration": 0.001776241999323247
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_13_token_bad_secret]",
+    "outcome": "passed",
+    "duration": 0.001635463002457982
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_14_token_pkce_no_verifier]",
+    "outcome": "passed",
+    "duration": 0.0019094730014330707
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_15_token_pkce_bad_verifier]",
+    "outcome": "passed",
+    "duration": 0.0018591799998830538
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_16_token_bad_code]",
+    "outcome": "passed",
+    "duration": 0.0015998729977582116
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_17_refresh_success]",
+    "outcome": "passed",
+    "duration": 0.004383180999866454
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_18_refresh_invalid]",
+    "outcome": "passed",
+    "duration": 0.003320727999380324
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_19_refresh_wrong_client]",
+    "outcome": "passed",
+    "duration": 0.003370262998942053
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_20_replay_attack]",
+    "outcome": "passed",
+    "duration": 0.003095347998169018
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_21_userinfo_access]",
+    "outcome": "passed",
+    "duration": 0.009709008998470381
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_22_login_fail_password]",
+    "outcome": "passed",
+    "duration": 0.0009206229988194536
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_23_login_fail_no_openid_scope]",
+    "outcome": "passed",
+    "duration": 0.0008856960012053605
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[bff_24_login_fail_unsupported_scope]",
+    "outcome": "passed",
+    "duration": 0.0008928659990488086
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_01_basic]",
+    "outcome": "passed",
+    "duration": 0.0014364449998538475
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_02_scope_profile]",
+    "outcome": "passed",
+    "duration": 0.0012574130014399998
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_03_different_account]",
+    "outcome": "passed",
+    "duration": 0.0012651750002987683
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_04_fail_password]",
+    "outcome": "passed",
+    "duration": 0.0007653270004084334
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_05_fail_username]",
+    "outcome": "passed",
+    "duration": 0.000866996000695508
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_06_fail_grant_type]",
+    "outcome": "passed",
+    "duration": 0.0008737709977140184
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_07_fail_unsupported_scope]",
+    "outcome": "passed",
+    "duration": 0.0007842010018066503
+  },
+  {
+    "nodeid": "test_pipeline.py::test_oidc_scenario[m2m_08_fail_no_openid_scope]",
+    "outcome": "passed",
+    "duration": 0.0007365489982475992
+  }
+]
