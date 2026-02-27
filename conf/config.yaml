@@ -1,5 +1,5 @@
 server:
-  issuer: "https://auth.sr.example.com:8000"
+  issuer: "https://auth.wgd.example.com:8000"
   listen_address: "0.0.0.0:8082"
   leeway_seconds: 5
 
@@ -19,7 +19,7 @@ clients:
   fruit-shop:
     client_type: Confidential
     allowed_redirect_uris:
-      - "https://www.sr.example.com:8000/shop/"
+      - "https://www.wgd.example.com:8000/shop/"
       - "http://localhost:8080/shop/"
     default_scope: "openid"
     audience: "fruit-shop"
