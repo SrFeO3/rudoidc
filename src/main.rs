@@ -337,8 +337,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(api_routes)
         .with_state(app_state.clone());
 
-    // start server
-    info!(listen_addr = %app_state.server_config.listen_address, issuer_url = %app_state.server_config.issuer, "OIDC server starting.");
+    // Prepare variables for the startup log
+    let server_name = &app_state.server_config.issuer;
+    let tcp_bind_address = &app_state.server_config.listen_address;
+    let server_port = tcp_bind_address.split(':').last().unwrap_or("unknown");
+    let user_count = app_state.users.len();
+    let client_count = app_state.clients.len();
+
+    info!(
+        "OIDC Provider started (Version: {}, PID: {}) with config for: {}, {}, {}, {}, Users: {}, Clients: {}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        server_name,
+        server_port,
+        tcp_bind_address,
+        config_path,
+        user_count,
+        client_count
+    );
+
     let listener = tokio::net::TcpListener::bind(&app_state.server_config.listen_address).await?;
     axum::serve(listener, app).await?;
 
@@ -1090,7 +1107,7 @@ async fn api_user_handler(
 }
 
 async fn root_handler() -> &'static str {
-    "hello flower world"
+    "Hello rudoidc world"
 }
 
 async fn logout_handler(
