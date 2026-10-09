@@ -270,8 +270,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     info!("Generating Ed25519 key pair...");
-    // rand 0.10 removed infallible `OsRng`; `SysRng` is fallible (`TryCryptoRng`),
-    // so adapt it with `UnwrapErr` as shown in ed25519-dalek 3.0 docs for `generate`.
     let mut csprng = rand::rand_core::UnwrapErr(rand::rngs::SysRng);
     let signing_key = Arc::new(SigningKey::generate(&mut csprng));
     info!("Key pair generated successfully.");
@@ -525,6 +523,12 @@ async fn authorize_handler(
     Query(params): Query<HashMap<String, String>>,
     uri: http::Uri,
 ) -> impl IntoResponse {
+    // Only the Authorization Code Flow is supported.
+    if params.get("response_type").is_none_or(|t| t != "code") {
+        warn!("Invalid authorize request: response_type must be 'code'");
+        return (StatusCode::BAD_REQUEST, "Invalid response_type").into_response();
+    }
+
     // Extract and validate client_id
     let client_id = match params.get("client_id") {
         Some(id) => id,
@@ -611,6 +615,12 @@ async fn login_post_handler(
         return (StatusCode::BAD_REQUEST, "Invalid redirect_uri").into_response();
     }
 
+    // Only the Authorization Code Flow is supported.
+    if params.get("response_type").is_none_or(|t| t != "code") {
+        warn!("Invalid login request: response_type must be 'code'");
+        return (StatusCode::BAD_REQUEST, "Invalid response_type").into_response();
+    }
+
     // Validate nonce (Required per specification)
     if !params.contains_key("nonce") {
         warn!("Invalid login request: nonce is required");
@@ -687,10 +697,13 @@ async fn login_post_handler(
 
     // Build the redirect URL
     let mut redirect_url = Url::parse(&redirect_uri).expect("Failed to parse redirect_uri");
-    redirect_url
-        .query_pairs_mut()
-        .append_pair("code", &code)
-        .append_pair("state", &params.get("state").cloned().unwrap_or_default());
+    redirect_url.query_pairs_mut().append_pair("code", &code);
+    // Echo state for CSRF protection only if the client sent it.
+    if let Some(state) = params.get("state") {
+        redirect_url
+            .query_pairs_mut()
+            .append_pair("state", state);
+    }
 
     info!(user = %username, "User authenticated successfully. Redirecting to client.");
     Redirect::to(redirect_url.as_str()).into_response()
@@ -808,25 +821,20 @@ async fn api_token_handler(
                     };
 
                     // Try to get secret from Basic Auth header first, then from the POST body.
-                    let provided_secret = if let Some(auth_header) = headers
+                    // A non-Basic header falls back to the body; only malformed Basic fails.
+                    let auth_header = headers
                         .get(header::AUTHORIZATION)
-                        .and_then(|h| h.to_str().ok())
-                    {
-                        if let Some(encoded) = auth_header.strip_prefix("Basic ") {
-                            if let Ok(decoded) =
-                                base64::engine::general_purpose::STANDARD.decode(encoded)
-                            {
-                                let creds = String::from_utf8(decoded).unwrap_or_default();
-                                // We only care about the password part for client_secret validation here.
-                                creds.split_once(':').map(|(_, p)| p.to_string())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        payload.get("client_secret").cloned()
+                        .and_then(|h| h.to_str().ok());
+                    let provided_secret = match auth_header {
+                        Some(h) if h.starts_with("Basic ") => h
+                            .strip_prefix("Basic ")
+                            .and_then(|encoded| {
+                                base64::engine::general_purpose::STANDARD.decode(encoded).ok()
+                            })
+                            .and_then(|decoded| String::from_utf8(decoded).ok())
+                            // We only care about the password part for client_secret validation here.
+                            .and_then(|creds| creds.split_once(':').map(|(_, p)| p.to_string())),
+                        _ => payload.get("client_secret").cloned(),
                     };
 
                     if provided_secret.as_deref() != Some(expected_secret.as_str()) {
@@ -1093,7 +1101,7 @@ async fn api_token_handler(
         "expires_in": client.access_token_lifetime_seconds,
     });
 
-    if grant_type == Some("authorization_code") && scope.contains("offline_access") {
+    if grant_type == Some("authorization_code") && scope_has(&scope, "offline_access") {
         let new_refresh_token: String = rand::rng()
             .sample_iter(&rand::distr::Alphanumeric)
             .take(64)
@@ -1151,7 +1159,7 @@ fn create_signed_id_token(
     }
 
     // If the "profile" scope is requested, add more user profile claims.
-    if scope.contains("profile")
+    if scope_has(scope, "profile")
         && let Some(user) = app_state.users.get(username)
     {
         let claims_map = claims.as_object_mut().unwrap();
@@ -1216,7 +1224,7 @@ fn create_signed_access_token(
         exp: iat + client.access_token_lifetime_seconds,
         iat,
         cid: client_id,
-        scp: scope.split(' ').collect(),
+        scp: scope.split_whitespace().collect(),
     };
 
     info!(?claims, "Issued Access Token");
@@ -1230,6 +1238,11 @@ fn create_signed_access_token(
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
     let encoding_key = EncodingKey::from_ed_der(der.as_bytes());
     encode(&header, &claims, &encoding_key)
+}
+
+/// Checks for an exact token in a space-delimited scope string (RFC 6749 Section 3.3).
+fn scope_has(scope: &str, token: &str) -> bool {
+    scope.split_whitespace().any(|s| s == token)
 }
 
 fn verify_pkce(challenge: &str, method: &str, verifier: &str) -> bool {

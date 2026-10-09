@@ -346,16 +346,19 @@ def run_m2m(case):
 def do_login(client_id, redirect_uri, username, password, scope=None, nonce=None,
              state="test_state_val", code_challenge=None, code_challenge_method="S256",
              omit_nonce=False, omit_redirect_uri=False, wrong_redirect_uri=False,
-             omit_client_id=False, wrong_client_id=False, omit_scope=False):
+             omit_client_id=False, wrong_client_id=False, omit_scope=False,
+             omit_state=False, response_type="code"):
     """POST /login with authorize-equivalent query params. Returns the response."""
     params = {
         "client_id": client_id,
-        "response_type": "code",
+        "response_type": response_type,
         "redirect_uri": redirect_uri,
         "scope": DEFAULT_SCOPE if scope is None else scope,
         "nonce": nonce or secrets.token_urlsafe(16),
         "state": state,
     }
+    if omit_state:
+        del params['state']
     if omit_scope:
         del params['scope']
     if code_challenge is not None:
@@ -403,6 +406,8 @@ def run_auth_flow(case, is_public):
         omit_client_id=bool(case.get('omit_client_id_login')),
         wrong_client_id=bool(case.get('wrong_client_id_login')),
         omit_scope=bool(case.get('omit_scope')),
+        omit_state=bool(case.get('omit_state')),
+        response_type=case.get('response_type', 'code'),
     )
     if use_pkce:
         login_kwargs["code_challenge"] = challenge
@@ -423,9 +428,13 @@ def run_auth_flow(case, is_public):
     qs = parse_qs(urlparse(location).query)
     assert 'code' in qs, "Authorization code not found in redirect URL"
     code = qs['code'][0]
-    # The server must echo the state for CSRF protection (S-26).
-    assert qs.get('state', [None])[0] == state, \
-        f"State echo mismatch. Expected {state!r}, got {qs.get('state')!r}"
+    if case.get('expect_no_state'):
+        # An omitted state must stay absent, not become an empty `state=` (G-14).
+        assert 'state' not in qs, f"State must be absent, got {qs.get('state')!r}"
+    else:
+        # The server must echo the state for CSRF protection (S-26).
+        assert qs.get('state', [None])[0] == state, \
+            f"State echo mismatch. Expected {state!r}, got {qs.get('state')!r}"
 
     # Optional: let the code expire before exchanging (S-22 lifetime).
     if case.get('sleep_before_exchange'):
@@ -473,6 +482,10 @@ def run_auth_flow(case, is_public):
 
     # Execute Token Exchange
     def do_exchange():
+        if case.get('garbage_bearer_header'):
+            # Unrelated Authorization header: must not block client_secret_post (G-13).
+            return SESSION.post(f"{BASE_URL}/api/token", data=token_data,
+                                headers={"Authorization": "Bearer garbage-token"})
         return SESSION.post(f"{BASE_URL}/api/token", data=token_data, auth=auth)
 
     res = do_exchange()
@@ -601,7 +614,7 @@ def run_authorize(case):
     """GET /authorize page rendering (S-04/S-05: login page entry point)."""
     params = {
         "client_id": case.get('client_id', 'another-app'),
-        "response_type": "code",
+        "response_type": case.get('response_type', 'code'),
         "redirect_uri": case.get('redirect_uri', 'http://sample.another.example.com:9090/callback'),
         "scope": "openid",
         "nonce": secrets.token_urlsafe(16),

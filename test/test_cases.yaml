@@ -665,6 +665,37 @@ test_cases:
     password: "password"
     omit_scope: true
 
+  - id: "spa_30_scope_whitespace"
+    type: "spa"
+    description: "SPA: Scope with trailing whitespace yields exact scp tokens"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid " # trailing space: scp must be exactly ["openid"]
+
+  - id: "spa_31_no_state"
+    type: "spa"
+    description: "SPA: Omitted state stays absent (no empty state=)"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid"
+    omit_state: true
+    expect_no_state: true
+
+  - id: "spa_32_bad_response_type"
+    type: "spa"
+    description: "SPA: Fail login with non-code response_type"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid"
+    response_type: "token"
+    expected_login_status: 400
+
   # ==========================================
   # BFF (Confidential Client): conformance additions
   # ==========================================
@@ -689,6 +720,18 @@ test_cases:
     password: "password2"
     scope: "openid"
     secret_in_body: true
+
+  - id: "bff_29_bearer_ignored_body_secret"
+    type: "bff"
+    description: "BFF: Unrelated Bearer header does not block body secret"
+    client_id: "fruit-shop"
+    client_secret: "fruit-shop-secret"
+    redirect_uri: "http://localhost:8080/shop/"
+    username: "tanaka"
+    password: "password2"
+    scope: "openid"
+    secret_in_body: true
+    garbage_bearer_header: true
 
   # ==========================================
   # Authorize page (GET /authorize) rendering
@@ -734,6 +777,14 @@ test_cases:
     description: "Authorize: reject missing client_id"
     redirect_uri: "http://sample.another.example.com:9090/callback"
     omit_client_id: true
+    expected_status: 400
+
+  - id: "authorize_07_bad_response_type"
+    type: "authorize"
+    description: "Authorize: reject non-code response_type"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    response_type: "id_token"
     expected_status: 400
 
   # ==========================================
