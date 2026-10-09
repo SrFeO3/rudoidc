@@ -121,8 +121,7 @@ use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
-use rand::Rng;
-use rand::rngs::OsRng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize}; // Ensure serde_yaml is added to Cargo.toml
 use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
@@ -271,8 +270,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     info!("Generating Ed25519 key pair...");
-    let mut rng = OsRng;
-    let signing_key = Arc::new(SigningKey::generate(&mut rng));
+    // rand 0.10 removed infallible `OsRng`; `SysRng` is fallible (`TryCryptoRng`),
+    // so adapt it with `UnwrapErr` as shown in ed25519-dalek 3.0 docs for `generate`.
+    let mut csprng = rand::rand_core::UnwrapErr(rand::rngs::SysRng);
+    let signing_key = Arc::new(SigningKey::generate(&mut csprng));
     info!("Key pair generated successfully.");
 
     // Pre-calculate the set of allowed origins at server startup.
@@ -656,8 +657,8 @@ async fn login_post_handler(
     }
 
     // Generate authorization code and store it with its info
-    let code: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
+    let code: String = rand::rng()
+        .sample_iter(&rand::distr::Alphanumeric)
         .take(32)
         .map(char::from)
         .collect();
@@ -1093,8 +1094,8 @@ async fn api_token_handler(
     });
 
     if grant_type == Some("authorization_code") && scope.contains("offline_access") {
-        let new_refresh_token: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
+        let new_refresh_token: String = rand::rng()
+            .sample_iter(&rand::distr::Alphanumeric)
             .take(64)
             .map(char::from)
             .collect();
@@ -1177,11 +1178,12 @@ fn create_signed_id_token(
 
     let mut header = Header::new(jsonwebtoken::Algorithm::EdDSA);
     header.kid = Some(app_state.signing_key_id.to_string());
-    let pem = app_state
+    // ed25519-dalek 3.0 removed `to_pkcs8_pem`; pass the same PKCS#8 bytes as DER.
+    let der = app_state
         .signing_key
-        .to_pkcs8_pem(Default::default())
+        .to_pkcs8_der()
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
-    let encoding_key = EncodingKey::from_ed_pem(pem.as_bytes())?;
+    let encoding_key = EncodingKey::from_ed_der(der.as_bytes());
     encode(&header, &claims, &encoding_key)
 }
 
@@ -1221,11 +1223,12 @@ fn create_signed_access_token(
 
     let mut header = Header::new(jsonwebtoken::Algorithm::EdDSA);
     header.kid = Some(app_state.signing_key_id.to_string());
-    let pem = app_state
+    // ed25519-dalek 3.0 removed `to_pkcs8_pem`; pass the same PKCS#8 bytes as DER.
+    let der = app_state
         .signing_key
-        .to_pkcs8_pem(Default::default())
+        .to_pkcs8_der()
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
-    let encoding_key = EncodingKey::from_ed_pem(pem.as_bytes())?;
+    let encoding_key = EncodingKey::from_ed_der(der.as_bytes());
     encode(&header, &claims, &encoding_key)
 }
 
