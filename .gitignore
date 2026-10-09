@@ -2,3 +2,4 @@
 /work
 test/.pytest_cache
 test/__pycache__/
+test/test_results.json

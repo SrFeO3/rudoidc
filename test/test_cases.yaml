@@ -633,3 +633,215 @@ test_cases:
     password: "secret-for-sa1"
     scope: "profile" # Missing 'openid'
     expected_status: 400
+
+  - id: "m2m_09_default_scope"
+    type: "m2m"
+    description: "M2M: Omitted scope falls back to client default_scope"
+    username: "service-account-1"
+    password: "secret-for-sa1"
+    omit_scope: true
+
+  # ==========================================
+  # SPA (Public Client): conformance additions
+  # ==========================================
+
+  - id: "spa_28_code_expired"
+    type: "spa"
+    description: "SPA: Fail token exchange with expired authorization code"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid"
+    sleep_before_exchange: 70 # auth code lifetime is 60s in main.rs
+    expected_token_status: 400
+
+  - id: "spa_29_default_scope"
+    type: "spa"
+    description: "SPA: Omitted scope falls back to client default_scope"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    omit_scope: true
+
+  # ==========================================
+  # BFF (Confidential Client): conformance additions
+  # ==========================================
+
+  - id: "bff_25_default_scope"
+    type: "bff"
+    description: "BFF: Omitted scope falls back to client default_scope"
+    client_id: "fruit-shop"
+    client_secret: "fruit-shop-secret"
+    redirect_uri: "http://localhost:8080/shop/"
+    username: "tanaka"
+    password: "password2"
+    omit_scope: true
+
+  - id: "bff_26_secret_in_body"
+    type: "bff"
+    description: "BFF: Success with client_secret_post (secret in body)"
+    client_id: "fruit-shop"
+    client_secret: "fruit-shop-secret"
+    redirect_uri: "http://localhost:8080/shop/"
+    username: "tanaka"
+    password: "password2"
+    scope: "openid"
+    secret_in_body: true
+
+  # ==========================================
+  # Authorize page (GET /authorize) rendering
+  # ==========================================
+
+  - id: "authorize_01_spa_valid"
+    type: "authorize"
+    description: "Authorize: render login page for public client"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+
+  - id: "authorize_02_bff_valid"
+    type: "authorize"
+    description: "Authorize: render login page for confidential client"
+    client_id: "fruit-shop"
+    redirect_uri: "http://localhost:8080/shop/"
+
+  - id: "authorize_03_unknown_client"
+    type: "authorize"
+    description: "Authorize: reject unknown client_id"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    unknown_client: true
+    expected_status: 400
+
+  - id: "authorize_04_bad_redirect"
+    type: "authorize"
+    description: "Authorize: reject unregistered redirect_uri"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    wrong_redirect_uri: true
+    expected_status: 400
+
+  - id: "authorize_05_no_nonce"
+    type: "authorize"
+    description: "Authorize: reject missing nonce"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    omit_nonce: true
+    expected_status: 400
+
+  - id: "authorize_06_no_client_id"
+    type: "authorize"
+    description: "Authorize: reject missing client_id"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    omit_client_id: true
+    expected_status: 400
+
+  # ==========================================
+  # Logout (POST /api/logout) revocation
+  # ==========================================
+
+  - id: "logout_01_revoke_spa"
+    type: "logout"
+    description: "Logout: revoke SPA refresh tokens"
+    scenario: "revoke"
+    client_type: "spa"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid offline_access"
+
+  - id: "logout_02_revoke_bff"
+    type: "logout"
+    description: "Logout: revoke BFF refresh tokens"
+    scenario: "revoke"
+    client_type: "bff"
+    client_id: "fruit-shop"
+    client_secret: "fruit-shop-secret"
+    redirect_uri: "http://localhost:8080/shop/"
+    username: "tanaka"
+    password: "password2"
+    scope: "openid offline_access"
+
+  - id: "logout_03_no_auth"
+    type: "logout"
+    description: "Logout: no token is a no-op success"
+    scenario: "no_auth"
+
+  - id: "logout_04_expired_access"
+    type: "logout"
+    description: "Logout: expired access token still revokes"
+    scenario: "expired_access"
+    client_type: "spa"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid offline_access"
+
+  - id: "logout_05_isolation"
+    type: "logout"
+    description: "Logout: revocation is scoped to user+client"
+    scenario: "isolation"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    scope: "openid offline_access"
+    user_a: "suzuki"
+    pass_a: "password"
+    user_b: "tanaka"
+    pass_b: "password2"
+
+  # ==========================================
+  # CORS policy
+  # ==========================================
+
+  - id: "cors_01_allowed_discovery"
+    type: "cors"
+    description: "CORS: allowed origin is echoed on discovery"
+    method: "GET"
+    path: "/.well-known/openid-configuration"
+    origin: "http://localhost:8080"
+    expected_status: 200
+    expect_acao: true
+
+  - id: "cors_02_denied_discovery"
+    type: "cors"
+    description: "CORS: disallowed origin is rejected"
+    method: "GET"
+    path: "/.well-known/openid-configuration"
+    origin: "http://evil.example.com"
+    expected_status: 403
+
+  - id: "cors_03_no_origin_passthrough"
+    type: "cors"
+    description: "CORS: requests without Origin pass through"
+    method: "GET"
+    path: "/.well-known/openid-configuration"
+    omit_origin: true
+    expected_status: 200
+
+  - id: "cors_04_preflight_allowed"
+    type: "cors"
+    description: "CORS: preflight from allowed origin succeeds"
+    method: "OPTIONS"
+    path: "/api/token"
+    origin: "http://localhost:8080"
+    expected_status: 204
+    preflight: true
+
+  - id: "cors_05_preflight_denied"
+    type: "cors"
+    description: "CORS: preflight from disallowed origin is rejected"
+    method: "OPTIONS"
+    path: "/api/token"
+    origin: "http://evil.example.com"
+    expected_status: 403
+
+  - id: "cors_06_jwks_ignores_origin"
+    type: "cors"
+    description: "CORS: JWKS is server-to-server (no CORS headers)"
+    method: "GET"
+    path: "/jwks.json"
+    origin: "http://evil.example.com"
+    expected_status: 200
+    expect_acao: false
