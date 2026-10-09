@@ -274,11 +274,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut allowed_origins = HashSet::new();
     for client in clients.values() {
         for uri_str in &client.allowed_redirect_uris {
-            if let Ok(uri) = uri_str.parse::<http::Uri>() {
-                if let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority()) {
-                    let origin = format!("{}://{}", scheme, authority);
-                    allowed_origins.insert(origin);
-                }
+            if let Ok(uri) = uri_str.parse::<http::Uri>()
+                && let (Some(scheme), Some(authority)) = (uri.scheme(), uri.authority())
+            {
+                let origin = format!("{}://{}", scheme, authority);
+                allowed_origins.insert(origin);
             }
         }
     }
@@ -340,7 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare variables for the startup log
     let server_name = &app_state.server_config.issuer;
     let tcp_bind_address = &app_state.server_config.listen_address;
-    let server_port = tcp_bind_address.split(':').last().unwrap_or("unknown");
+    let server_port = tcp_bind_address.split(':').next_back().unwrap_or("unknown");
     let user_count = app_state.users.len();
     let client_count = app_state.clients.len();
 
@@ -528,7 +528,7 @@ async fn authorize_handler(
     }
 
     // Validate nonce (Required per specification for SPA and BFF)
-    if params.get("nonce").is_none() {
+    if !params.contains_key("nonce") {
         warn!("Invalid authorize request: nonce is required");
         return (StatusCode::BAD_REQUEST, "nonce is required").into_response();
     }
@@ -559,7 +559,7 @@ async fn login_post_handler(
     let user_valid = app_state
         .users
         .get(username.as_str())
-        .map_or(false, |user| &user.password == password);
+        .is_some_and(|user| &user.password == password);
 
     if !user_valid {
         warn!("Invalid credentials for user: {}", username);
@@ -585,7 +585,7 @@ async fn login_post_handler(
     }
 
     // Validate nonce (Required per specification)
-    if params.get("nonce").is_none() {
+    if !params.contains_key("nonce") {
         warn!("Invalid login request: nonce is required");
         return (StatusCode::BAD_REQUEST, "nonce is required").into_response();
     }
@@ -652,17 +652,16 @@ async fn api_token_handler(
 
     // If client_id is not provided in the form body, try to extract it from the Basic Auth header.
     // This is common for Confidential Clients (BFFs) using Basic Auth for authentication.
-    if client_id.is_empty() {
-        if let Some(auth_header) = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
-            if let Some(encoded) = auth_header.strip_prefix("Basic ") {
-                if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
-                    let creds = String::from_utf8(decoded).unwrap_or_default();
-                    if let Some((id, _)) = creds.split_once(':') {
-                        client_id = id.to_string();
-                    }
-                }
-            }
-        }
+    if client_id.is_empty()
+        && let Some(auth_header) = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+        && let Some(encoded) = auth_header.strip_prefix("Basic ")
+        && let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded)
+        && let Ok(creds) = String::from_utf8(decoded)
+        && let Some((id, _)) = creds.split_once(':')
+    {
+        client_id = id.to_string();
     }
 
     info!(grant_type, client_id, "Token endpoint called");
@@ -960,15 +959,15 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
     }
 
     // If the "profile" scope is requested, add more user profile claims.
-    if scope.contains("profile") {
-        if let Some(user) = app_state.users.get(username) {
-            let claims_map = claims.as_object_mut().unwrap();
-            claims_map.insert("family_name".to_string(), serde_json::Value::String(user.family_name.clone()));
-            claims_map.insert("given_name".to_string(), serde_json::Value::String(user.given_name.clone()));
-            claims_map.insert("preferred_username".to_string(), serde_json::Value::String(user.preferred_username.clone()));
-            // 'name' can be constructed from given and family names for a better representation.
-            claims_map.insert("name".to_string(), serde_json::Value::String(format!("{} {}", user.given_name, user.family_name)));
-        }
+    if scope.contains("profile")
+        && let Some(user) = app_state.users.get(username)
+    {
+        let claims_map = claims.as_object_mut().unwrap();
+        claims_map.insert("family_name".to_string(), serde_json::Value::String(user.family_name.clone()));
+        claims_map.insert("given_name".to_string(), serde_json::Value::String(user.given_name.clone()));
+        claims_map.insert("preferred_username".to_string(), serde_json::Value::String(user.preferred_username.clone()));
+        // 'name' can be constructed from given and family names for a better representation.
+        claims_map.insert("name".to_string(), serde_json::Value::String(format!("{} {}", user.given_name, user.family_name)));
     }
 
     info!(?claims, "Issued ID Token");
