@@ -107,22 +107,22 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use axum::{
+    Json, Router,
     body::Body,
-    extract::{Form, State},
     extract::Query,
-    http::{self, header, HeaderMap, Method, Request, StatusCode},
+    extract::{Form, State},
+    http::{self, HeaderMap, Method, Request, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
-    Json, Router,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::EncodePrivateKey;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use rand::rngs::OsRng;
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::Rng;
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize}; // Ensure serde_yaml is added to Cargo.toml
 use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
@@ -209,9 +209,9 @@ struct Client {
 #[derive(Debug, Clone)]
 struct AuthCodeInfo {
     username: String,
-    client_id: String, // The client this code was issued for.
-    scope: String, // The scope requested by the client.
-    code_challenge: String, // The PKCE code challenge.
+    client_id: String,             // The client this code was issued for.
+    scope: String,                 // The scope requested by the client.
+    code_challenge: String,        // The PKCE code challenge.
     code_challenge_method: String, // The PKCE code challenge method (e.g., "S256").
     nonce: Option<String>,
     expires_at: DateTime<Utc>, // The expiration time of the code.
@@ -253,7 +253,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Load configuration from file specified by CONFIG_FILE env var, defaulting to conf/config.yaml
-    let config_path = std::env::var("CONFIG_FILE").unwrap_or_else(|_| "conf/config.yaml".to_string());
+    let config_path =
+        std::env::var("CONFIG_FILE").unwrap_or_else(|_| "conf/config.yaml".to_string());
     info!(config_path, "Loading configuration...");
     let config_content = std::fs::read_to_string(&config_path)?;
     let app_config: AppConfig = serde_yaml::from_str(&config_content)?;
@@ -263,7 +264,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let clients = app_config.clients;
     let basic_auth_credentials = app_config.basic_auth_credentials;
 
-    info!(user_count = users.len(), client_count = clients.len(), "Configuration loaded.");
+    info!(
+        user_count = users.len(),
+        client_count = clients.len(),
+        "Configuration loaded."
+    );
 
     info!("Generating Ed25519 key pair...");
     let mut rng = OsRng;
@@ -327,7 +332,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .route("/logout", post(logout_handler))
                 .route("/userinfo", get(api_user_handler)),
         )
-        .layer(middleware::from_fn_with_state(app_state.allowed_origins.clone(), enforce_cors_middleware));
+        .layer(middleware::from_fn_with_state(
+            app_state.allowed_origins.clone(),
+            enforce_cors_middleware,
+        ));
 
     // --- Combine all routers into the final application ---
     let app = Router::new()
@@ -378,14 +386,19 @@ async fn enforce_cors_middleware(
         "CORS Middleware: Received request"
     );
 
-    let origin = request.headers().get(header::ORIGIN).and_then(|o| o.to_str().ok());
+    let origin = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|o| o.to_str().ok());
 
     // Only perform CORS checks if the Origin header is present.
     let origin_str = match origin {
         Some(o) => o,
         // Requests without an Origin header (e.g., server-to-server) are passed through.
         None => {
-            info!("CORS Middleware: No Origin header, passing through. (Not a cross-origin browser request)");
+            info!(
+                "CORS Middleware: No Origin header, passing through. (Not a cross-origin browser request)"
+            );
             return next.run(request).await;
         }
     };
@@ -416,7 +429,9 @@ async fn enforce_cors_middleware(
 
     // Add CORS header to the response for actual requests.
     let mut response = next.run(request).await;
-    response.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin_header);
+    response
+        .headers_mut()
+        .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin_header);
     //response.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true".parse().unwrap());
     response
 }
@@ -443,7 +458,10 @@ async fn start_cleanup_task(
             codes.retain(|_, info| info.expires_at > now);
             initial_len - codes.len()
         };
-        info!("Cleanup: Removed {} expired authorization code(s).", cleaned_auth_codes);
+        info!(
+            "Cleanup: Removed {} expired authorization code(s).",
+            cleaned_auth_codes
+        );
 
         // 2. Clean up expired refresh tokens.
         let cleaned_refresh_tokens = {
@@ -452,15 +470,16 @@ async fn start_cleanup_task(
             tokens.retain(|_, info| info.expires_at > now);
             initial_len - tokens.len()
         };
-        info!("Cleanup: Removed {} expired refresh token(s).", cleaned_refresh_tokens);
+        info!(
+            "Cleanup: Removed {} expired refresh token(s).",
+            cleaned_refresh_tokens
+        );
     }
 }
 
 // page handlers
 
-async fn discovery_handler(
-    State(app_state): State<AppState>,
-) -> impl IntoResponse {
+async fn discovery_handler(State(app_state): State<AppState>) -> impl IntoResponse {
     let config = app_state.server_config;
     let discovery_doc = serde_json::json!({
         "issuer": config.issuer,
@@ -476,9 +495,7 @@ async fn discovery_handler(
     (StatusCode::OK, Json(discovery_doc))
 }
 
-async fn jwks_handler(
-    State(app_state): State<AppState>,
-) -> impl IntoResponse {
+async fn jwks_handler(State(app_state): State<AppState>) -> impl IntoResponse {
     let verifying_key = app_state.signing_key.verifying_key();
     let x = URL_SAFE_NO_PAD.encode(verifying_key.as_bytes());
 
@@ -494,7 +511,10 @@ async fn jwks_handler(
     });
 
     let mut headers = http::HeaderMap::new();
-    headers.insert(header::CACHE_CONTROL, "public, max-age=86400".parse().unwrap());
+    headers.insert(
+        header::CACHE_CONTROL,
+        "public, max-age=86400".parse().unwrap(),
+    );
     info!("Served JWKS");
     (headers, Json(jwks))
 }
@@ -523,7 +543,10 @@ async fn authorize_handler(
         None => return (StatusCode::BAD_REQUEST, "redirect_uri is required").into_response(),
     };
     if !client.allowed_redirect_uris.contains(redirect_uri) {
-        warn!("Invalid authorize request for client {}: redirect_uri {} not allowed, expected uri {:?}", client_id, redirect_uri, client.allowed_redirect_uris);
+        warn!(
+            "Invalid authorize request for client {}: redirect_uri {} not allowed, expected uri {:?}",
+            client_id, redirect_uri, client.allowed_redirect_uris
+        );
         return (StatusCode::BAD_REQUEST, "Invalid redirect_uri").into_response();
     }
 
@@ -563,7 +586,10 @@ async fn login_post_handler(
 
     if !user_valid {
         warn!("Invalid credentials for user: {}", username);
-        let error_html = render_login_page(uri.query().unwrap_or(""), Some("Invalid username or password"));
+        let error_html = render_login_page(
+            uri.query().unwrap_or(""),
+            Some("Invalid username or password"),
+        );
         return (StatusCode::UNAUTHORIZED, Html(error_html)).into_response();
     }
 
@@ -593,7 +619,10 @@ async fn login_post_handler(
     // Determine scope
     let scope = params.get("scope").map_or_else(
         || {
-            warn!("Client '{}' did not specify a 'scope'. Falling back to default scope: '{}'", client_id, client.default_scope);
+            warn!(
+                "Client '{}' did not specify a 'scope'. Falling back to default scope: '{}'",
+                client_id, client.default_scope
+            );
             client.default_scope.clone()
         },
         |s| s.clone(),
@@ -604,24 +633,43 @@ async fn login_post_handler(
 
     if !requested_scopes.contains("openid") {
         warn!("Invalid login request: 'openid' scope is required");
-        return (StatusCode::BAD_REQUEST, "invalid_scope: 'openid' scope is required").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid_scope: 'openid' scope is required",
+        )
+            .into_response();
     }
 
     for s in &requested_scopes {
         if !SUPPORTED_SCOPES.contains(s) {
-            warn!(client_id, scope = s, "Invalid login request: unsupported scope requested");
-            return (StatusCode::BAD_REQUEST, "invalid_scope: one or more scopes are not supported").into_response();
+            warn!(
+                client_id,
+                scope = s,
+                "Invalid login request: unsupported scope requested"
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                "invalid_scope: one or more scopes are not supported",
+            )
+                .into_response();
         }
     }
 
     // Generate authorization code and store it with its info
-    let code: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(32).map(char::from).collect();
+    let code: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
     let code_info = AuthCodeInfo {
         username: username.clone(),
         client_id: client_id.clone(),
         scope,
         code_challenge: params.get("code_challenge").cloned().unwrap_or_default(),
-        code_challenge_method: params.get("code_challenge_method").cloned().unwrap_or_default(),
+        code_challenge_method: params
+            .get("code_challenge_method")
+            .cloned()
+            .unwrap_or_default(),
         nonce: params.get("nonce").cloned(),
         expires_at: Utc::now() + chrono::Duration::minutes(1),
     };
@@ -629,12 +677,17 @@ async fn login_post_handler(
     {
         let mut auth_codes = app_state.auth_codes.lock().unwrap();
         auth_codes.insert(code.clone(), code_info);
-        info!("Issued authorization code for user '{}'. Total active codes: {}", username, auth_codes.len());
+        info!(
+            "Issued authorization code for user '{}'. Total active codes: {}",
+            username,
+            auth_codes.len()
+        );
     }
 
     // Build the redirect URL
     let mut redirect_url = Url::parse(&redirect_uri).expect("Failed to parse redirect_uri");
-    redirect_url.query_pairs_mut()
+    redirect_url
+        .query_pairs_mut()
         .append_pair("code", &code)
         .append_pair("state", &params.get("state").cloned().unwrap_or_default());
 
@@ -698,21 +751,39 @@ async fn api_token_handler(
                 Some(c) => c,
                 None => {
                     // This case should ideally not be reached due to prior checks, but as a safeguard:
-                    warn!(client_id, "Client not found during audience lookup in token handler");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Client configuration error").into_response();
+                    warn!(
+                        client_id,
+                        "Client not found during audience lookup in token handler"
+                    );
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Client configuration error",
+                    )
+                        .into_response();
                 }
             };
-            
+
             // --- Client Type Specific Validations ---
             match client.client_type {
                 ClientType::Public => {
                     // Public clients (SPAs) MUST use PKCE and MUST NOT use a client secret.
                     let code_verifier = payload.get("code_verifier").cloned().unwrap_or_default();
                     if code_verifier.is_empty() {
-                        warn!(client_id, "PKCE error: code_verifier is missing for public client");
-                        return (StatusCode::BAD_REQUEST, "code_verifier is required for public clients").into_response();
+                        warn!(
+                            client_id,
+                            "PKCE error: code_verifier is missing for public client"
+                        );
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            "code_verifier is required for public clients",
+                        )
+                            .into_response();
                     }
-                    if !verify_pkce(&code_info.code_challenge, &code_info.code_challenge_method, &code_verifier) {
+                    if !verify_pkce(
+                        &code_info.code_challenge,
+                        &code_info.code_challenge_method,
+                        &code_verifier,
+                    ) {
                         warn!(user = %code_info.username, "PKCE verification failed for public client");
                         return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
                     }
@@ -723,38 +794,73 @@ async fn api_token_handler(
                     let expected_secret = match &client.client_secret {
                         Some(s) => s,
                         None => {
-                            error!(client_id, "Server configuration error: Confidential client has no secret configured.");
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Server configuration error").into_response();
+                            error!(
+                                client_id,
+                                "Server configuration error: Confidential client has no secret configured."
+                            );
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Server configuration error",
+                            )
+                                .into_response();
                         }
                     };
 
                     // Try to get secret from Basic Auth header first, then from the POST body.
-                    let provided_secret = if let Some(auth_header) = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok()) {
+                    let provided_secret = if let Some(auth_header) = headers
+                        .get(header::AUTHORIZATION)
+                        .and_then(|h| h.to_str().ok())
+                    {
                         if let Some(encoded) = auth_header.strip_prefix("Basic ") {
-                            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+                            if let Ok(decoded) =
+                                base64::engine::general_purpose::STANDARD.decode(encoded)
+                            {
                                 let creds = String::from_utf8(decoded).unwrap_or_default();
                                 // We only care about the password part for client_secret validation here.
                                 creds.split_once(':').map(|(_, p)| p.to_string())
-                            } else { None }
-                        } else { None }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     } else {
                         payload.get("client_secret").cloned()
                     };
 
                     if provided_secret.as_deref() != Some(expected_secret.as_str()) {
-                        warn!(client_id, "Invalid client_secret provided for confidential client");
-                        return (StatusCode::UNAUTHORIZED, "Invalid client authentication").into_response();
+                        warn!(
+                            client_id,
+                            "Invalid client_secret provided for confidential client"
+                        );
+                        return (StatusCode::UNAUTHORIZED, "Invalid client authentication")
+                            .into_response();
                     }
-                    info!(client_id, "Client secret verified successfully for confidential client");
+                    info!(
+                        client_id,
+                        "Client secret verified successfully for confidential client"
+                    );
 
                     // PKCE is optional (defense-in-depth). If a challenge was sent, the verifier must be present and valid.
                     if !code_info.code_challenge.is_empty() {
-                        let code_verifier = payload.get("code_verifier").cloned().unwrap_or_default();
+                        let code_verifier =
+                            payload.get("code_verifier").cloned().unwrap_or_default();
                         if code_verifier.is_empty() {
-                            warn!(client_id, "PKCE error: code_verifier is missing for a request that used a code_challenge");
-                            return (StatusCode::BAD_REQUEST, "code_verifier is required when code_challenge is used").into_response();
+                            warn!(
+                                client_id,
+                                "PKCE error: code_verifier is missing for a request that used a code_challenge"
+                            );
+                            return (
+                                StatusCode::BAD_REQUEST,
+                                "code_verifier is required when code_challenge is used",
+                            )
+                                .into_response();
                         }
-                        if !verify_pkce(&code_info.code_challenge, &code_info.code_challenge_method, &code_verifier) {
+                        if !verify_pkce(
+                            &code_info.code_challenge,
+                            &code_info.code_challenge_method,
+                            &code_verifier,
+                        ) {
                             warn!(user = %code_info.username, "PKCE verification failed for confidential client");
                             return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
                         }
@@ -763,7 +869,13 @@ async fn api_token_handler(
                 }
             }
 
-            (code_info.username, code_info.scope, client.audience.clone(), client_id, code_info.nonce)
+            (
+                code_info.username,
+                code_info.scope,
+                client.audience.clone(),
+                client_id,
+                code_info.nonce,
+            )
         }
         Some("refresh_token") => {
             let refresh_token = payload.get("refresh_token").cloned().unwrap_or_default();
@@ -796,40 +908,57 @@ async fn api_token_handler(
             let audience = match app_state.clients.get(client_id.as_str()) {
                 Some(client) => client.audience.clone(),
                 None => {
-                    warn!(client_id, "Client not found during audience lookup in token handler (refresh)");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Client configuration error").into_response();
+                    warn!(
+                        client_id,
+                        "Client not found during audience lookup in token handler (refresh)"
+                    );
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Client configuration error",
+                    )
+                        .into_response();
                 }
             };
-            (token_info.username, token_info.scope, audience, client_id, None)
+            (
+                token_info.username,
+                token_info.scope,
+                audience,
+                client_id,
+                None,
+            )
         }
         Some("client_credentials") => {
             // For Client Credentials, authentication is performed via HTTP Basic Auth.
-            let auth_header = headers.get(header::AUTHORIZATION).and_then(|h| h.to_str().ok());
+            let auth_header = headers
+                .get(header::AUTHORIZATION)
+                .and_then(|h| h.to_str().ok());
 
-            let (auth_username, auth_password) = match auth_header.and_then(|h| h.strip_prefix("Basic ")) {
-                Some(encoded) => {
-                    match base64::engine::general_purpose::STANDARD.decode(encoded) {
-                        Ok(decoded_bytes) => {
-                            let decoded_str = String::from_utf8(decoded_bytes).unwrap_or_default();
-                            if let Some((u, p)) = decoded_str.split_once(':') {
-                                (u.to_string(), p.to_string())
-                            } else {
-                                (String::new(), String::new())
-                            }
-                        },
-                        Err(_) => (String::new(), String::new()),
+            let (auth_username, auth_password) = match auth_header
+                .and_then(|h| h.strip_prefix("Basic "))
+            {
+                Some(encoded) => match base64::engine::general_purpose::STANDARD.decode(encoded) {
+                    Ok(decoded_bytes) => {
+                        let decoded_str = String::from_utf8(decoded_bytes).unwrap_or_default();
+                        if let Some((u, p)) = decoded_str.split_once(':') {
+                            (u.to_string(), p.to_string())
+                        } else {
+                            (String::new(), String::new())
+                        }
                     }
+                    Err(_) => (String::new(), String::new()),
                 },
                 None => {
                     warn!("Client credentials grant requires HTTP Basic authentication.");
-                    return (StatusCode::UNAUTHORIZED, "Invalid client credentials").into_response();
+                    return (StatusCode::UNAUTHORIZED, "Invalid client credentials")
+                        .into_response();
                 }
             };
             let cred = match app_state.basic_auth_credentials.get(auth_username.as_str()) {
                 Some(c) if c.password == auth_password => c,
                 _ => {
                     warn!(username = %auth_username, "Invalid client credentials provided.");
-                    return (StatusCode::UNAUTHORIZED, "Invalid client credentials").into_response();
+                    return (StatusCode::UNAUTHORIZED, "Invalid client credentials")
+                        .into_response();
                 }
             };
 
@@ -837,11 +966,17 @@ async fn api_token_handler(
                 Some(c) => c,
                 None => {
                     error!(credential_user = %auth_username, client_id = %cred.client_id, "Credential is linked to a non-existent client_id");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Server configuration error").into_response();
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Server configuration error",
+                    )
+                        .into_response();
                 }
             };
 
-            let scope = payload.get("scope").map_or_else(|| client.default_scope.clone(), |s| s.clone());
+            let scope = payload
+                .get("scope")
+                .map_or_else(|| client.default_scope.clone(), |s| s.clone());
 
             // Validate scopes for M2M grant, similar to authorization code flow.
             const SUPPORTED_SCOPES: &[&str] = &["openid", "profile", "offline_access"];
@@ -850,16 +985,30 @@ async fn api_token_handler(
             // Require 'openid' scope for consistency, even for M2M.
             if !requested_scopes.contains("openid") {
                 warn!(client_id = %cred.client_id, "M2M grant: 'openid' scope is required");
-                return (StatusCode::BAD_REQUEST, "invalid_scope: 'openid' scope is required").into_response();
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "invalid_scope: 'openid' scope is required",
+                )
+                    .into_response();
             }
 
             for s in &requested_scopes {
                 if !SUPPORTED_SCOPES.contains(s) {
                     warn!(client_id = %cred.client_id, scope = s, "M2M grant: unsupported scope requested");
-                    return (StatusCode::BAD_REQUEST, "invalid_scope: one or more scopes are not supported").into_response();
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        "invalid_scope: one or more scopes are not supported",
+                    )
+                        .into_response();
                 }
             }
-            (auth_username, scope, client.audience.clone(), cred.client_id.clone(), None)
+            (
+                auth_username,
+                scope,
+                client.audience.clone(),
+                cred.client_id.clone(),
+                None,
+            )
         }
         _ => {
             warn!(?grant_type, "Unsupported grant_type");
@@ -871,14 +1020,25 @@ async fn api_token_handler(
     if grant_type == Some("client_credentials") {
         info!(service_account = %username, "Successfully validated client_credentials grant. Generating access token...");
         let now = Utc::now();
-        let access_token = match create_signed_access_token(&username, &audience, &scope, &client_id_for_token, now, &app_state) {
+        let access_token = match create_signed_access_token(
+            &username,
+            &audience,
+            &scope,
+            &client_id_for_token,
+            now,
+            &app_state,
+        ) {
             Ok(token) => token,
             Err(e) => {
                 error!(service_account = %username, error = ?e, "Failed to sign access token for service account");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+                    .into_response();
             }
         };
-        let client = app_state.clients.get(client_id_for_token.as_str()).expect("Client must exist");
+        let client = app_state
+            .clients
+            .get(client_id_for_token.as_str())
+            .expect("Client must exist");
         let response = serde_json::json!({
             "access_token": access_token,
             "token_type": "Bearer",
@@ -891,7 +1051,14 @@ async fn api_token_handler(
     info!(user = %username, "Successfully validated grant. Generating tokens...");
 
     let now = Utc::now();
-    let id_token = match create_signed_id_token(&username, &client_id_for_token, &scope, now, &app_state, nonce) {
+    let id_token = match create_signed_id_token(
+        &username,
+        &client_id_for_token,
+        &scope,
+        now,
+        &app_state,
+        nonce,
+    ) {
         Ok(token) => token,
         Err(e) => {
             tracing::error!(user = %username, error = ?e, "Failed to sign id token");
@@ -899,7 +1066,14 @@ async fn api_token_handler(
         }
     };
 
-    let access_token = match create_signed_access_token(&username, &audience, &scope, &client_id_for_token, now, &app_state) {
+    let access_token = match create_signed_access_token(
+        &username,
+        &audience,
+        &scope,
+        &client_id_for_token,
+        now,
+        &app_state,
+    ) {
         Ok(token) => token,
         Err(e) => {
             tracing::error!(user = %username, error = ?e, "Failed to sign access token");
@@ -907,7 +1081,10 @@ async fn api_token_handler(
         }
     };
 
-    let client = app_state.clients.get(client_id_for_token.as_str()).expect("Client must exist");
+    let client = app_state
+        .clients
+        .get(client_id_for_token.as_str())
+        .expect("Client must exist");
     let mut response_body = serde_json::json!({
         "access_token": access_token,
         "id_token": id_token,
@@ -916,7 +1093,11 @@ async fn api_token_handler(
     });
 
     if grant_type == Some("authorization_code") && scope.contains("offline_access") {
-        let new_refresh_token: String = rand::thread_rng().sample_iter(&rand::distributions::Alphanumeric).take(64).map(char::from).collect();
+        let new_refresh_token: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(64)
+            .map(char::from)
+            .collect();
 
         let token_info = RefreshTokenInfo {
             username: username.to_string(),
@@ -939,7 +1120,14 @@ async fn api_token_handler(
     (StatusCode::OK, Json(response_body)).into_response()
 }
 
-fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: DateTime<Utc>, app_state: &AppState, nonce: Option<String>) -> Result<String, jsonwebtoken::errors::Error> {
+fn create_signed_id_token(
+    username: &str,
+    client_id: &str,
+    scope: &str,
+    now: DateTime<Utc>,
+    app_state: &AppState,
+    nonce: Option<String>,
+) -> Result<String, jsonwebtoken::errors::Error> {
     let client = app_state.clients.get(client_id).expect("Client must exist");
     let iat = now.timestamp();
 
@@ -955,7 +1143,10 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
     });
 
     if let Some(n) = nonce {
-        claims.as_object_mut().unwrap().insert("nonce".to_string(), serde_json::Value::String(n));
+        claims
+            .as_object_mut()
+            .unwrap()
+            .insert("nonce".to_string(), serde_json::Value::String(n));
     }
 
     // If the "profile" scope is requested, add more user profile claims.
@@ -963,24 +1154,45 @@ fn create_signed_id_token(username: &str, client_id: &str, scope: &str, now: Dat
         && let Some(user) = app_state.users.get(username)
     {
         let claims_map = claims.as_object_mut().unwrap();
-        claims_map.insert("family_name".to_string(), serde_json::Value::String(user.family_name.clone()));
-        claims_map.insert("given_name".to_string(), serde_json::Value::String(user.given_name.clone()));
-        claims_map.insert("preferred_username".to_string(), serde_json::Value::String(user.preferred_username.clone()));
+        claims_map.insert(
+            "family_name".to_string(),
+            serde_json::Value::String(user.family_name.clone()),
+        );
+        claims_map.insert(
+            "given_name".to_string(),
+            serde_json::Value::String(user.given_name.clone()),
+        );
+        claims_map.insert(
+            "preferred_username".to_string(),
+            serde_json::Value::String(user.preferred_username.clone()),
+        );
         // 'name' can be constructed from given and family names for a better representation.
-        claims_map.insert("name".to_string(), serde_json::Value::String(format!("{} {}", user.given_name, user.family_name)));
+        claims_map.insert(
+            "name".to_string(),
+            serde_json::Value::String(format!("{} {}", user.given_name, user.family_name)),
+        );
     }
 
     info!(?claims, "Issued ID Token");
 
     let mut header = Header::new(jsonwebtoken::Algorithm::EdDSA);
     header.kid = Some(app_state.signing_key_id.to_string());
-    let pem = app_state.signing_key.to_pkcs8_pem(Default::default())
+    let pem = app_state
+        .signing_key
+        .to_pkcs8_pem(Default::default())
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
     let encoding_key = EncodingKey::from_ed_pem(pem.as_bytes())?;
     encode(&header, &claims, &encoding_key)
 }
 
-fn create_signed_access_token(username: &str, audience: &str, scope: &str, client_id: &str, now: DateTime<Utc>, app_state: &AppState) -> Result<String, jsonwebtoken::errors::Error> {
+fn create_signed_access_token(
+    username: &str,
+    audience: &str,
+    scope: &str,
+    client_id: &str,
+    now: DateTime<Utc>,
+    app_state: &AppState,
+) -> Result<String, jsonwebtoken::errors::Error> {
     #[derive(Serialize, Debug)]
     struct Claims<'a> {
         iss: &'a str,
@@ -1009,7 +1221,9 @@ fn create_signed_access_token(username: &str, audience: &str, scope: &str, clien
 
     let mut header = Header::new(jsonwebtoken::Algorithm::EdDSA);
     header.kid = Some(app_state.signing_key_id.to_string());
-    let pem = app_state.signing_key.to_pkcs8_pem(Default::default())
+    let pem = app_state
+        .signing_key
+        .to_pkcs8_pem(Default::default())
         .map_err(|_| jsonwebtoken::errors::ErrorKind::InvalidKeyFormat)?;
     let encoding_key = EncodingKey::from_ed_pem(pem.as_bytes())?;
     encode(&header, &claims, &encoding_key)
@@ -1054,7 +1268,10 @@ async fn api_user_handler(
     State(app_state): State<AppState>,
     request: Request<Body>,
 ) -> impl IntoResponse {
-    let auth_header = request.headers().get(header::AUTHORIZATION).and_then(|h| h.to_str().ok());
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
 
     let token_string = match auth_header.and_then(|h| h.strip_prefix("Bearer ")) {
         Some(token) => token,
@@ -1065,7 +1282,9 @@ async fn api_user_handler(
 
     // Define the claims we expect in the access token.
     #[derive(Deserialize)]
-    struct AccessTokenClaims { sub: String }
+    struct AccessTokenClaims {
+        sub: String,
+    }
 
     let x = URL_SAFE_NO_PAD.encode(app_state.signing_key.verifying_key().as_bytes());
     let decoding_key = match DecodingKey::from_ed_components(&x) {
@@ -1087,7 +1306,7 @@ async fn api_user_handler(
             return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
         }
     };
-    
+
     let user_info = match app_state.users.get(&claims.sub) {
         Some(user) => serde_json::json!({
             "sub": claims.sub,
@@ -1113,7 +1332,10 @@ async fn logout_handler(
     State(app_state): State<AppState>,
     request: Request<Body>,
 ) -> impl IntoResponse {
-    let auth_header = request.headers().get(header::AUTHORIZATION).and_then(|h| h.to_str().ok());
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
 
     let token_string = match auth_header.and_then(|h| h.strip_prefix("Bearer ")) {
         Some(token) => token,
@@ -1163,7 +1385,8 @@ async fn logout_handler(
     let revoked_count = {
         let mut refresh_tokens = app_state.refresh_tokens.lock().unwrap();
         let initial_len = refresh_tokens.len();
-        refresh_tokens.retain(|_, info| !(info.username == username && info.client_id == client_id));
+        refresh_tokens
+            .retain(|_, info| !(info.username == username && info.client_id == client_id));
         initial_len - refresh_tokens.len()
     };
 
