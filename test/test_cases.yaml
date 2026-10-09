@@ -78,6 +78,7 @@ test_cases:
     password: "password"
     pkce_method: "plain"
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   - id: "spa_07_login_no_nonce"
     type: "spa"
@@ -139,6 +140,7 @@ test_cases:
     password: "password"
     omit_code_verifier: true
     expected_token_status: 400
+    expected_token_error: "invalid_request"
 
   - id: "spa_13_token_bad_verifier"
     type: "spa"
@@ -149,6 +151,7 @@ test_cases:
     password: "password"
     wrong_code_verifier: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   - id: "spa_14_token_bad_code"
     type: "spa"
@@ -159,6 +162,7 @@ test_cases:
     password: "password"
     invalid_code: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   - id: "spa_15_token_wrong_client"
     type: "spa"
@@ -169,6 +173,7 @@ test_cases:
     password: "password"
     wrong_client_id_token: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   # --- Refresh Token Flow Cases ---
   - id: "spa_16_refresh_success"
@@ -192,6 +197,7 @@ test_cases:
     test_refresh: true
     invalid_refresh: true
     expected_refresh_status: 400
+    expected_refresh_error: "invalid_grant"
 
   - id: "spa_18_refresh_wrong_client"
     type: "spa"
@@ -204,6 +210,7 @@ test_cases:
     test_refresh: true
     wrong_client_refresh: true
     expected_refresh_status: 400
+    expected_refresh_error: "invalid_grant"
 
   # --- Security & State Cases ---
   - id: "spa_19_state_check"
@@ -235,6 +242,7 @@ test_cases:
     test_refresh: true
     omit_client_id_refresh: true
     expected_refresh_status: 400
+    expected_refresh_error: "invalid_grant"
 
   - id: "spa_22_userinfo_access"
     type: "spa"
@@ -426,6 +434,7 @@ test_cases:
     password: "password2"
     omit_client_secret: true
     expected_token_status: 401
+    expected_token_error: "invalid_client"
 
   - id: "bff_13_token_bad_secret"
     type: "bff"
@@ -437,6 +446,7 @@ test_cases:
     password: "password2"
     wrong_client_secret: true
     expected_token_status: 401
+    expected_token_error: "invalid_client"
 
   - id: "bff_14_token_pkce_no_verifier"
     type: "bff"
@@ -449,6 +459,7 @@ test_cases:
     use_pkce: true
     omit_code_verifier: true
     expected_token_status: 400
+    expected_token_error: "invalid_request"
 
   - id: "bff_15_token_pkce_bad_verifier"
     type: "bff"
@@ -461,6 +472,7 @@ test_cases:
     use_pkce: true
     wrong_code_verifier: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   - id: "bff_16_token_bad_code"
     type: "bff"
@@ -472,6 +484,7 @@ test_cases:
     password: "password2"
     invalid_code: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   # --- Refresh Token Flow Cases ---
   - id: "bff_17_refresh_success"
@@ -497,6 +510,7 @@ test_cases:
     test_refresh: true
     invalid_refresh: true
     expected_refresh_status: 400
+    expected_refresh_error: "invalid_grant"
 
   - id: "bff_19_refresh_wrong_client"
     type: "bff"
@@ -510,6 +524,7 @@ test_cases:
     test_refresh: true
     wrong_client_refresh: true
     expected_refresh_status: 400
+    expected_refresh_error: "invalid_grant"
 
   # --- Security & State Cases ---
   - id: "bff_20_replay_attack"
@@ -600,6 +615,7 @@ test_cases:
     password: "wrong_password"
     scope: "openid"
     expected_status: 401
+    expected_error: "invalid_client"
 
   - id: "m2m_05_fail_username"
     type: "m2m"
@@ -608,6 +624,7 @@ test_cases:
     password: "secret-for-sa1"
     scope: "openid"
     expected_status: 401
+    expected_error: "invalid_client"
 
   - id: "m2m_06_fail_grant_type"
     type: "m2m"
@@ -617,6 +634,7 @@ test_cases:
     scope: "openid"
     grant_type: "password" # Invalid for M2M endpoint usage here
     expected_status: 400
+    expected_error: "unsupported_grant_type"
 
   - id: "m2m_07_fail_unsupported_scope"
     type: "m2m"
@@ -625,6 +643,7 @@ test_cases:
     password: "secret-for-sa1"
     scope: "openid email" # 'email' is not supported
     expected_status: 400
+    expected_error: "invalid_scope"
 
   - id: "m2m_08_fail_no_openid_scope"
     type: "m2m"
@@ -633,6 +652,7 @@ test_cases:
     password: "secret-for-sa1"
     scope: "profile" # Missing 'openid'
     expected_status: 400
+    expected_error: "invalid_scope"
 
   - id: "m2m_09_default_scope"
     type: "m2m"
@@ -655,6 +675,7 @@ test_cases:
     scope: "openid"
     sleep_before_exchange: 70 # auth code lifetime is 60s in main.rs
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   - id: "spa_29_default_scope"
     type: "spa"
@@ -706,6 +727,7 @@ test_cases:
     scope: "openid"
     omit_redirect_uri_token: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   - id: "spa_34_token_wrong_redirect"
     type: "spa"
@@ -717,6 +739,7 @@ test_cases:
     scope: "openid"
     wrong_redirect_uri_token: true
     expected_token_status: 400
+    expected_token_error: "invalid_grant"
 
   # ==========================================
   # BFF (Confidential Client): conformance additions
@@ -918,3 +941,12 @@ test_cases:
     origin: "http://evil.example.com"
     expected_status: 200
     expect_acao: false
+
+  # ==========================================
+  # Userinfo standalone checks
+  # ==========================================
+
+  - id: "userinfo_01_no_auth"
+    type: "userinfo"
+    description: "Userinfo: missing token carries WWW-Authenticate"
+    scenario: "no_auth"

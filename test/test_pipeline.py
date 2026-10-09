@@ -233,6 +233,8 @@ def test_oidc_scenario(case):
         run_logout(case)
     elif test_type == 'cors':
         run_cors(case)
+    elif test_type == 'userinfo':
+        run_userinfo(case)
     else:
         pytest.fail(f"Unknown test type: {test_type}")
 
@@ -326,22 +328,48 @@ def run_m2m(case):
     )
     assert res.status_code == exp_status, f"M2M token request status mismatch. Expected {exp_status}, got {res.status_code}. Body: {res.text}"
 
-    if exp_status == 200:
-        data = res.json()
-        assert "access_token" in data, "Response missing access_token"
-        # Client Credentials issues no ID Token (S-03: user-less grant).
-        assert "id_token" not in data, "M2M response must not contain an id_token"
-        assert data.get("token_type") == "Bearer", "M2M token_type must be Bearer"
-        assert data.get("scope") == effective_scope, \
-            f"M2M scope echo mismatch. Expected {effective_scope!r}, got {data.get('scope')!r}"
-        assert data.get("expires_in") == EXPECTED_CLIENTS[M2M_CLIENT_MAP[username]]["access_token_lifetime"], \
-            "M2M expires_in must equal the client access lifetime"
-        claims = decode_jwt_payload(data["access_token"])
-        assert claims is not None, "Failed to decode M2M access token"
-        assert claims.get("sub") == username, "M2M access sub must be the service account"
-        assert claims.get("cid") == M2M_CLIENT_MAP[username], "M2M access cid mismatch"
-        assert set(claims.get("scp", [])) == set(effective_scope.split()), "M2M access scp mismatch"
-        assert_token_signature(data["access_token"], "M2M access token")
+    if exp_status != 200:
+        if 'expected_error' in case:
+            assert res.json().get("error") == case['expected_error'], \
+                f"M2M error code mismatch. Expected {case['expected_error']!r}, got {res.text[:200]!r}"
+        return
+
+    assert_no_store(res, "M2M token")
+    data = res.json()
+    assert "access_token" in data, "Response missing access_token"
+    # Client Credentials issues no ID Token (S-03: user-less grant).
+    assert "id_token" not in data, "M2M response must not contain an id_token"
+    assert data.get("token_type") == "Bearer", "M2M token_type must be Bearer"
+    assert data.get("scope") == effective_scope, \
+        f"M2M scope echo mismatch. Expected {effective_scope!r}, got {data.get('scope')!r}"
+    assert data.get("expires_in") == EXPECTED_CLIENTS[M2M_CLIENT_MAP[username]]["access_token_lifetime"], \
+        "M2M expires_in must equal the client access lifetime"
+    claims = decode_jwt_payload(data["access_token"])
+    assert claims is not None, "Failed to decode M2M access token"
+    assert claims.get("sub") == username, "M2M access sub must be the service account"
+    assert claims.get("cid") == M2M_CLIENT_MAP[username], "M2M access cid mismatch"
+    assert set(claims.get("scp", [])) == set(effective_scope.split()), "M2M access scp mismatch"
+    assert_token_signature(data["access_token"], "M2M access token")
+
+def assert_no_store(res, what):
+    """Token responses must not be cached (OIDC Core Section 3.1.3.3, G-06)."""
+    assert res.headers.get("Cache-Control") == "no-store", \
+        f"{what}: Cache-Control must be no-store, got {res.headers.get('Cache-Control')!r}"
+    assert res.headers.get("Pragma") == "no-cache", \
+        f"{what}: Pragma must be no-cache, got {res.headers.get('Pragma')!r}"
+
+def assert_oauth_error(res, expected_error, what):
+    """Token errors use RFC 6749 Section 5.2 JSON (G-05)."""
+    assert res.json().get("error") == expected_error, \
+        f"{what}: error code mismatch. Expected {expected_error!r}, got {res.text[:200]!r}"
+
+def assert_www_auth_bearer(res, what):
+    """Protected-resource failures carry WWW-Authenticate (RFC 6750 Section 3, G-08)."""
+    www_auth = res.headers.get("WWW-Authenticate", "")
+    assert "Bearer" in www_auth and 'error="invalid_token"' in www_auth, \
+        f"{what}: WWW-Authenticate mismatch, got {www_auth!r}"
+    assert res.json().get("error") == "invalid_token", \
+        f"{what}: JSON error must be invalid_token, got {res.text[:200]!r}"
 
 def do_login(client_id, redirect_uri, username, password, scope=None, nonce=None,
              state="test_state_val", code_challenge=None, code_challenge_method="S256",
@@ -495,8 +523,11 @@ def run_auth_flow(case, is_public):
     assert res.status_code == exp_token_status, f"Token exchange status mismatch. Expected {exp_token_status}, got {res.status_code}. Body: {res.text}"
 
     if exp_token_status != 200:
+        if 'expected_token_error' in case:
+            assert_oauth_error(res, case['expected_token_error'], "Token exchange")
         return # Stop if we expected token exchange to fail
 
+    assert_no_store(res, "Token")
     data = res.json()
     assert data.get("token_type") == "Bearer", "token_type must be Bearer"
     assert "id_token" in data, "id_token missing from response"
@@ -546,6 +577,7 @@ def run_auth_flow(case, is_public):
         headers = {"Authorization": f"Bearer {access_token}"}
         res_expired = SESSION.get(f"{BASE_URL}/api/userinfo", headers=headers)
         assert res_expired.status_code == 401, f"Expired token should be rejected with 401, but got {res_expired.status_code}"
+        assert_www_auth_bearer(res_expired, "Expired token")
 
     # --- Optional: Replay Attack Test ---
     if case.get('replay_code'):
@@ -564,6 +596,7 @@ def run_auth_flow(case, is_public):
             headers = {"Authorization": f"Bearer {tampered_token}"}
             res_tampered = SESSION.get(f"{BASE_URL}/api/userinfo", headers=headers)
             assert res_tampered.status_code == 401, f"Tampered token should be rejected with 401, but got {res_tampered.status_code}"
+            assert_www_auth_bearer(res_tampered, "Tampered token")
             # The tampered token must also fail local signature verification (C4 control).
             assert ed25519_verify(
                 f"{parts[0]}.{parts[1]}".encode('ascii'),
@@ -606,12 +639,27 @@ def run_auth_flow(case, is_public):
         assert res_refresh.status_code == expected_refresh_status, \
             f"Refresh status mismatch. Expected {expected_refresh_status}, got {res_refresh.status_code}. Body: {res_refresh.text}"
 
-        if expected_refresh_status == 200:
-            refresh_body = res_refresh.json()
-            assert "access_token" in refresh_body, "New access token missing in refresh response"
-            assert "id_token" in refresh_body, "New id_token missing in refresh response"
-            assert_token_signature(refresh_body["access_token"], "refreshed access token")
-            assert_token_signature(refresh_body["id_token"], "refreshed ID token")
+        if expected_refresh_status != 200:
+            if 'expected_refresh_error' in case:
+                assert_oauth_error(res_refresh, case['expected_refresh_error'], "Refresh")
+            return
+
+        assert_no_store(res_refresh, "Refresh")
+        refresh_body = res_refresh.json()
+        assert "access_token" in refresh_body, "New access token missing in refresh response"
+        assert "id_token" in refresh_body, "New id_token missing in refresh response"
+        assert_token_signature(refresh_body["access_token"], "refreshed access token")
+        assert_token_signature(refresh_body["id_token"], "refreshed ID token")
+
+def run_userinfo(case):
+    """Standalone userinfo checks without a login flow (G-08)."""
+    scenario = case.get('scenario', 'no_auth')
+    if scenario == 'no_auth':
+        res = SESSION.get(f"{BASE_URL}/api/userinfo")
+        assert res.status_code == 401, f"Userinfo without token must be 401, got {res.status_code}"
+        assert_www_auth_bearer(res, "Userinfo without token")
+    else:
+        pytest.fail(f"Unknown userinfo scenario: {scenario}")
 
 def run_authorize(case):
     """GET /authorize page rendering (S-04/S-05: login page entry point)."""

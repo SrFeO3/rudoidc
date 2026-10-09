@@ -702,9 +702,7 @@ async fn login_post_handler(
     redirect_url.query_pairs_mut().append_pair("code", &code);
     // Echo state for CSRF protection only if the client sent it.
     if let Some(state) = params.get("state") {
-        redirect_url
-            .query_pairs_mut()
-            .append_pair("state", state);
+        redirect_url.query_pairs_mut().append_pair("state", state);
     }
 
     info!(user = %username, "User authenticated successfully. Redirecting to client.");
@@ -748,18 +746,21 @@ async fn api_token_handler(
                 Some(info) => info,
                 None => {
                     warn!("Invalid authorization code used");
-                    return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                    return token_error("invalid_grant", "Invalid authorization code");
                 }
             };
 
             if Utc::now() > code_info.expires_at {
                 warn!(user = %code_info.username, "Expired authorization code used");
-                return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                return token_error("invalid_grant", "Expired authorization code");
             }
 
             if code_info.client_id != client_id {
                 warn!(expected = %code_info.client_id, got = %client_id, "Mismatched client_id for auth code");
-                return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                return token_error(
+                    "invalid_grant",
+                    "Mismatched client_id for authorization code",
+                );
             }
 
             // The redirect_uri must match the authorize request (RFC 6749 Section 4.1.3).
@@ -767,7 +768,10 @@ async fn api_token_handler(
                 Some(uri) if *uri == code_info.redirect_uri => {}
                 _ => {
                     warn!(expected = %code_info.redirect_uri, "Mismatched redirect_uri for auth code");
-                    return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                    return token_error(
+                        "invalid_grant",
+                        "Mismatched redirect_uri for authorization code",
+                    );
                 }
             }
 
@@ -780,11 +784,7 @@ async fn api_token_handler(
                         client_id,
                         "Client not found during audience lookup in token handler"
                     );
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Client configuration error",
-                    )
-                        .into_response();
+                    return token_error("server_error", "Client configuration error");
                 }
             };
 
@@ -798,11 +798,10 @@ async fn api_token_handler(
                             client_id,
                             "PKCE error: code_verifier is missing for public client"
                         );
-                        return (
-                            StatusCode::BAD_REQUEST,
+                        return token_error(
+                            "invalid_request",
                             "code_verifier is required for public clients",
-                        )
-                            .into_response();
+                        );
                     }
                     if !verify_pkce(
                         &code_info.code_challenge,
@@ -810,7 +809,7 @@ async fn api_token_handler(
                         &code_verifier,
                     ) {
                         warn!(user = %code_info.username, "PKCE verification failed for public client");
-                        return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                        return token_error("invalid_grant", "PKCE verification failed");
                     }
                     info!(user = %code_info.username, "PKCE verification successful for public client");
                 }
@@ -823,11 +822,7 @@ async fn api_token_handler(
                                 client_id,
                                 "Server configuration error: Confidential client has no secret configured."
                             );
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "Server configuration error",
-                            )
-                                .into_response();
+                            return token_error("server_error", "Server configuration error");
                         }
                     };
 
@@ -840,7 +835,9 @@ async fn api_token_handler(
                         Some(h) if h.starts_with("Basic ") => h
                             .strip_prefix("Basic ")
                             .and_then(|encoded| {
-                                base64::engine::general_purpose::STANDARD.decode(encoded).ok()
+                                base64::engine::general_purpose::STANDARD
+                                    .decode(encoded)
+                                    .ok()
                             })
                             .and_then(|decoded| String::from_utf8(decoded).ok())
                             // We only care about the password part for client_secret validation here.
@@ -853,8 +850,7 @@ async fn api_token_handler(
                             client_id,
                             "Invalid client_secret provided for confidential client"
                         );
-                        return (StatusCode::UNAUTHORIZED, "Invalid client authentication")
-                            .into_response();
+                        return invalid_client("Invalid client authentication");
                     }
                     info!(
                         client_id,
@@ -870,11 +866,10 @@ async fn api_token_handler(
                                 client_id,
                                 "PKCE error: code_verifier is missing for a request that used a code_challenge"
                             );
-                            return (
-                                StatusCode::BAD_REQUEST,
+                            return token_error(
+                                "invalid_request",
                                 "code_verifier is required when code_challenge is used",
-                            )
-                                .into_response();
+                            );
                         }
                         if !verify_pkce(
                             &code_info.code_challenge,
@@ -882,7 +877,7 @@ async fn api_token_handler(
                             &code_verifier,
                         ) {
                             warn!(user = %code_info.username, "PKCE verification failed for confidential client");
-                            return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                            return token_error("invalid_grant", "PKCE verification failed");
                         }
                         info!(user = %code_info.username, "PKCE verification successful for confidential client (defense-in-depth)");
                     }
@@ -908,7 +903,7 @@ async fn api_token_handler(
                 Some(info) => info,
                 None => {
                     warn!("Invalid refresh token used");
-                    return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                    return token_error("invalid_grant", "Invalid refresh token");
                 }
             };
 
@@ -916,12 +911,12 @@ async fn api_token_handler(
                 warn!(user = %token_info.username, "Expired refresh token used");
                 let mut refresh_tokens = app_state.refresh_tokens.lock().unwrap();
                 refresh_tokens.remove(&refresh_token);
-                return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                return token_error("invalid_grant", "Expired refresh token");
             }
 
             if token_info.client_id != client_id {
                 warn!(expected = %token_info.client_id, got = %client_id, "Mismatched client_id for refresh token");
-                return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                return token_error("invalid_grant", "Mismatched client_id for refresh token");
             }
 
             info!(user = %token_info.username, "Attempting to refresh token");
@@ -932,11 +927,7 @@ async fn api_token_handler(
                         client_id,
                         "Client not found during audience lookup in token handler (refresh)"
                     );
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Client configuration error",
-                    )
-                        .into_response();
+                    return token_error("server_error", "Client configuration error");
                 }
             };
             (
@@ -969,16 +960,16 @@ async fn api_token_handler(
                 },
                 None => {
                     warn!("Client credentials grant requires HTTP Basic authentication.");
-                    return (StatusCode::UNAUTHORIZED, "Invalid client credentials")
-                        .into_response();
+                    return invalid_client(
+                        "Client credentials grant requires HTTP Basic authentication",
+                    );
                 }
             };
             let cred = match app_state.basic_auth_credentials.get(auth_username.as_str()) {
                 Some(c) if c.password == auth_password => c,
                 _ => {
                     warn!(username = %auth_username, "Invalid client credentials provided.");
-                    return (StatusCode::UNAUTHORIZED, "Invalid client credentials")
-                        .into_response();
+                    return invalid_client("Invalid client credentials");
                 }
             };
 
@@ -986,11 +977,7 @@ async fn api_token_handler(
                 Some(c) => c,
                 None => {
                     error!(credential_user = %auth_username, client_id = %cred.client_id, "Credential is linked to a non-existent client_id");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Server configuration error",
-                    )
-                        .into_response();
+                    return token_error("server_error", "Server configuration error");
                 }
             };
 
@@ -1005,21 +992,13 @@ async fn api_token_handler(
             // Require 'openid' scope for consistency, even for M2M.
             if !requested_scopes.contains("openid") {
                 warn!(client_id = %cred.client_id, "M2M grant: 'openid' scope is required");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "invalid_scope: 'openid' scope is required",
-                )
-                    .into_response();
+                return token_error("invalid_scope", "'openid' scope is required");
             }
 
             for s in &requested_scopes {
                 if !SUPPORTED_SCOPES.contains(s) {
                     warn!(client_id = %cred.client_id, scope = s, "M2M grant: unsupported scope requested");
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        "invalid_scope: one or more scopes are not supported",
-                    )
-                        .into_response();
+                    return token_error("invalid_scope", "One or more scopes are not supported");
                 }
             }
             (
@@ -1032,7 +1011,7 @@ async fn api_token_handler(
         }
         _ => {
             warn!(?grant_type, "Unsupported grant_type");
-            return (StatusCode::BAD_REQUEST, "Unsupported grant_type").into_response();
+            return token_error("unsupported_grant_type", "Unsupported grant_type");
         }
     };
 
@@ -1051,8 +1030,7 @@ async fn api_token_handler(
             Ok(token) => token,
             Err(e) => {
                 error!(service_account = %username, error = ?e, "Failed to sign access token for service account");
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
-                    .into_response();
+                return token_error("server_error", "Internal server error");
             }
         };
         let client = app_state
@@ -1065,7 +1043,9 @@ async fn api_token_handler(
             "expires_in": client.access_token_lifetime_seconds,
             "scope": scope,
         });
-        return (StatusCode::OK, Json(response)).into_response();
+        let mut res = (StatusCode::OK, Json(response)).into_response();
+        no_store_headers(res.headers_mut());
+        return res;
     }
 
     info!(user = %username, "Successfully validated grant. Generating tokens...");
@@ -1082,7 +1062,7 @@ async fn api_token_handler(
         Ok(token) => token,
         Err(e) => {
             tracing::error!(user = %username, error = ?e, "Failed to sign id token");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+            return token_error("server_error", "Internal server error");
         }
     };
 
@@ -1097,7 +1077,7 @@ async fn api_token_handler(
         Ok(token) => token,
         Err(e) => {
             tracing::error!(user = %username, error = ?e, "Failed to sign access token");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response();
+            return token_error("server_error", "Internal server error");
         }
     };
 
@@ -1137,7 +1117,9 @@ async fn api_token_handler(
     }
 
     info!(user = %username, ?grant_type, "Successfully issued tokens");
-    (StatusCode::OK, Json(response_body)).into_response()
+    let mut res = (StatusCode::OK, Json(response_body)).into_response();
+    no_store_headers(res.headers_mut());
+    res
 }
 
 fn create_signed_id_token(
@@ -1256,6 +1238,49 @@ fn scope_has(scope: &str, token: &str) -> bool {
     scope.split_whitespace().any(|s| s == token)
 }
 
+/// OAuth 2.0 token error response (RFC 6749 Section 5.2).
+/// The status is derived from the code, so the pair stays consistent.
+fn token_error(error: &str, description: &str) -> Response {
+    let status = match error {
+        "invalid_client" | "invalid_token" => StatusCode::UNAUTHORIZED,
+        "server_error" => StatusCode::INTERNAL_SERVER_ERROR,
+        _ => StatusCode::BAD_REQUEST,
+    };
+    (
+        status,
+        Json(serde_json::json!({"error": error, "error_description": description})),
+    )
+        .into_response()
+}
+
+/// Client authentication failure (RFC 6749 Section 5.2: HTTP 401 with WWW-Authenticate).
+fn invalid_client(description: &str) -> Response {
+    let mut res = token_error("invalid_client", description);
+    res.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        "Basic realm=\"token\"".parse().unwrap(),
+    );
+    res
+}
+
+/// Attach cache directives required for token responses (OIDC Core Section 3.1.3.3).
+fn no_store_headers(headers: &mut HeaderMap) {
+    headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    headers.insert(header::PRAGMA, "no-cache".parse().unwrap());
+}
+
+/// Protected-resource error with WWW-Authenticate (RFC 6750 Section 3).
+fn bearer_error(error: &str, description: &str) -> Response {
+    let mut res = token_error(error, description);
+    res.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        format!("Bearer error=\"{error}\", error_description=\"{description}\"")
+            .parse()
+            .unwrap(),
+    );
+    res
+}
+
 fn verify_pkce(challenge: &str, method: &str, verifier: &str) -> bool {
     if method != "S256" {
         warn!(method, "Unsupported code_challenge_method");
@@ -1303,7 +1328,7 @@ async fn api_user_handler(
     let token_string = match auth_header.and_then(|h| h.strip_prefix("Bearer ")) {
         Some(token) => token,
         None => {
-            return (StatusCode::UNAUTHORIZED, "Authorization header required").into_response();
+            return bearer_error("invalid_token", "Authorization header required");
         }
     };
 
@@ -1330,7 +1355,7 @@ async fn api_user_handler(
         Ok(token_data) => token_data.claims,
         Err(e) => {
             warn!(error = ?e, "Invalid token provided to userinfo endpoint");
-            return (StatusCode::UNAUTHORIZED, "Invalid token").into_response();
+            return bearer_error("invalid_token", "Invalid token");
         }
     };
 
