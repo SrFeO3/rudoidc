@@ -476,6 +476,9 @@ def run_auth_flow(case, is_public):
 
     # Apply Token Overrides
     if case.get('invalid_code'): token_data['code'] = "invalid_auth_code"
+    if case.get('omit_redirect_uri_token'): del token_data['redirect_uri']
+    if case.get('wrong_redirect_uri_token'):
+        token_data['redirect_uri'] = "http://evil.com/callback"
     if case.get('wrong_client_id_token'):
         if is_public: token_data['client_id'] = "wrong-client"
         else: auth = ("wrong-client", case.get('client_secret', ''))

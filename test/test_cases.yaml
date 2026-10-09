@@ -696,6 +696,28 @@ test_cases:
     response_type: "token"
     expected_login_status: 400
 
+  - id: "spa_33_token_no_redirect"
+    type: "spa"
+    description: "SPA: Fail token exchange without redirect_uri"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid"
+    omit_redirect_uri_token: true
+    expected_token_status: 400
+
+  - id: "spa_34_token_wrong_redirect"
+    type: "spa"
+    description: "SPA: Fail token exchange with mismatched redirect_uri"
+    client_id: "another-app"
+    redirect_uri: "http://sample.another.example.com:9090/callback"
+    username: "suzuki"
+    password: "password"
+    scope: "openid"
+    wrong_redirect_uri_token: true
+    expected_token_status: 400
+
   # ==========================================
   # BFF (Confidential Client): conformance additions
   # ==========================================

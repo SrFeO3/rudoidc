@@ -209,6 +209,7 @@ struct Client {
 struct AuthCodeInfo {
     username: String,
     client_id: String,             // The client this code was issued for.
+    redirect_uri: String,          // The redirect_uri from the authorize request.
     scope: String,                 // The scope requested by the client.
     code_challenge: String,        // The PKCE code challenge.
     code_challenge_method: String, // The PKCE code challenge method (e.g., "S256").
@@ -675,6 +676,7 @@ async fn login_post_handler(
     let code_info = AuthCodeInfo {
         username: username.clone(),
         client_id: client_id.clone(),
+        redirect_uri: redirect_uri.clone(),
         scope,
         code_challenge: params.get("code_challenge").cloned().unwrap_or_default(),
         code_challenge_method: params
@@ -758,6 +760,15 @@ async fn api_token_handler(
             if code_info.client_id != client_id {
                 warn!(expected = %code_info.client_id, got = %client_id, "Mismatched client_id for auth code");
                 return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+            }
+
+            // The redirect_uri must match the authorize request (RFC 6749 Section 4.1.3).
+            match payload.get("redirect_uri") {
+                Some(uri) if *uri == code_info.redirect_uri => {}
+                _ => {
+                    warn!(expected = %code_info.redirect_uri, "Mismatched redirect_uri for auth code");
+                    return (StatusCode::BAD_REQUEST, "Invalid grant").into_response();
+                }
             }
 
             // Get client configuration to determine validation rules
